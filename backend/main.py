@@ -1,5 +1,5 @@
 import os
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
 
@@ -31,14 +31,58 @@ app.add_middleware(
 
 # 라우터 등록
 api_prefix = "/api"
-app.include_router(auth.router, prefix=api_prefix)
-app.include_router(dashboard.router, prefix=api_prefix)
-app.include_router(patients.router, prefix=api_prefix)
-app.include_router(medications.router, prefix=api_prefix)
-app.include_router(recovery_guides.router, prefix=api_prefix)
-app.include_router(clinic.router, prefix=api_prefix)
-app.include_router(alerts.router, prefix=api_prefix)
-app.include_router(procedures.router, prefix=api_prefix)
+# 로그인 API는 인증 없이 접근 가능
+app.include_router(
+    auth.router,
+    prefix=api_prefix,
+)
+
+# 아래 API는 로그인한 사용자만 접근 가능
+protected_dependencies = [
+    Depends(auth.get_current_user)
+]
+
+app.include_router(
+    dashboard.router,
+    prefix=api_prefix,
+    dependencies=protected_dependencies,
+)
+
+app.include_router(
+    patients.router,
+    prefix=api_prefix,
+    dependencies=protected_dependencies,
+)
+
+app.include_router(
+    medications.router,
+    prefix=api_prefix,
+    dependencies=protected_dependencies,
+)
+
+app.include_router(
+    recovery_guides.router,
+    prefix=api_prefix,
+    dependencies=protected_dependencies,
+)
+
+app.include_router(
+    clinic.router,
+    prefix=api_prefix,
+    dependencies=protected_dependencies,
+)
+
+app.include_router(
+    alerts.router,
+    prefix=api_prefix,
+    dependencies=protected_dependencies,
+)
+
+app.include_router(
+    procedures.router,
+    prefix=api_prefix,
+    dependencies=protected_dependencies,
+)
 
 
 @app.get("/api/health")

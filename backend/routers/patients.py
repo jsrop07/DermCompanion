@@ -4,13 +4,22 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
 from database import get_db
-from models.models import Patient, Procedure, PatientMedication, MedicationLog, MedicationStatus, Alert, StaffNote
+from models.models import (
+    Patient,
+    Procedure,
+    PatientMedication,
+    MedicationLog,
+    MedicationStatus,
+    Alert,
+    StaffNote,
+    RecoveryGuide,
+)
 from schemas.schemas import (
     PatientCreate, PatientUpdate, PatientOut, PatientDetailOut, PatientListItem,
     PatientMedicationCreate, PatientMedicationOut,
     MedicationLogCreate, MedicationLogOut, MedicationLogCalendarItem,
     StaffNoteCreate, StaffNoteOut,
-    ProcedureCreate, ProcedureOut,
+    ProcedureCreate, ProcedureUpdate, ProcedureOut,
 )
 
 router = APIRouter(prefix="/patients", tags=["patients"])
@@ -238,18 +247,138 @@ def create_medication_log(
 
 # ─── Patient Procedures ─────────────────────────────────
 
-@router.post("/{patient_id}/procedures", response_model=ProcedureOut, status_code=201)
-def add_procedure(patient_id: int, data: ProcedureCreate, db: Session = Depends(get_db)):
-    patient = db.query(Patient).filter(Patient.id == patient_id).first()
+@router.post(
+    "/{patient_id}/procedures",
+    response_model=ProcedureOut,
+    status_code=201,
+)
+def add_procedure(
+    patient_id: int,
+    data: ProcedureCreate,
+    db: Session = Depends(get_db),
+):
+    patient = (
+        db.query(Patient)
+        .filter(Patient.id == patient_id)
+        .first()
+    )
+
     if not patient:
-        raise HTTPException(status_code=404, detail="환자를 찾을 수 없습니다.")
-    proc = Procedure(patient_id=patient_id, **data.model_dump(exclude={"patient_id"}))
+        raise HTTPException(
+            status_code=404,
+            detail="환자를 찾을 수 없습니다.",
+        )
+
+    payload = data.model_dump(exclude={"patient_id"})
+
+    if data.recovery_guide_id is not None:
+        recovery_guide = (
+            db.query(RecoveryGuide)
+            .filter(
+                RecoveryGuide.id == data.recovery_guide_id,
+                RecoveryGuide.is_active == True,
+            )
+            .first()
+        )
+
+        if not recovery_guide:
+            raise HTTPException(
+                status_code=404,
+                detail="선택한 회복 가이드를 찾을 수 없습니다.",
+            )
+
+        # 최초 등록 시 현재 회복 단계를 가이드의 첫 단계로 설정
+        if not payload.get("recovery_stage") and recovery_guide.steps:
+            payload["recovery_stage"] = recovery_guide.steps[0].time_stage
+
+        if payload.get("recovery_progress") is None:
+            payload["recovery_progress"] = 0.0
+
+    proc = Procedure(
+        patient_id=patient_id,
+        **payload,
+    )
+
     db.add(proc)
     db.commit()
     db.refresh(proc)
+
     return proc
 
+@router.put(
+    "/{patient_id}/procedures/{procedure_id}",
+    response_model=ProcedureOut,
+)
+def update_patient_procedure(
+    patient_id: int,
+    procedure_id: int,
+    data: ProcedureUpdate,
+    db: Session = Depends(get_db),
+):
+    procedure = (
+        db.query(Procedure)
+        .filter(
+            Procedure.id == procedure_id,
+            Procedure.patient_id == patient_id,
+        )
+        .first()
+    )
 
+    if not procedure:
+        raise HTTPException(
+            status_code=404,
+            detail="시술 기록을 찾을 수 없습니다.",
+        )
+
+    update_data = data.model_dump(exclude_unset=True)
+
+    if "recovery_guide_id" in update_data:
+        recovery_guide_id = update_data["recovery_guide_id"]
+
+        if recovery_guide_id is not None:
+            recovery_guide = (
+                db.query(RecoveryGuide)
+                .filter(
+                    RecoveryGuide.id == recovery_guide_id,
+                    RecoveryGuide.is_active == True,
+                )
+                .first()
+            )
+
+            if not recovery_guide:
+                raise HTTPException(
+                    status_code=404,
+                    detail="선택한 회복 가이드를 찾을 수 없습니다.",
+                )
+
+            # 템플릿을 변경했을 때 현재 단계가 새 가이드에 없으면
+            # 새 가이드의 첫 번째 단계로 초기화
+            step_names = {
+                step.time_stage
+                for step in recovery_guide.steps
+            }
+
+            current_or_requested_stage = update_data.get(
+                "recovery_stage",
+                procedure.recovery_stage,
+            )
+
+            if (
+                recovery_guide.steps
+                and current_or_requested_stage not in step_names
+            ):
+                update_data["recovery_stage"] = (
+                    recovery_guide.steps[0].time_stage
+                )
+                update_data["recovery_progress"] = 0.0
+
+    for key, value in update_data.items():
+        setattr(procedure, key, value)
+
+    db.commit()
+    db.refresh(procedure)
+
+    return procedure
 # ─── Staff Notes ────────────────────────────────────────
 
 @router.get("/{patient_id}/notes", response_model=List[StaffNoteOut])

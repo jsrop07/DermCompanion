@@ -16,7 +16,17 @@ import {
   Save,
   CalendarDays,
   List,
+  ClipboardPen,
+  ChevronDown,
+  ChevronUp,
 } from "lucide-react";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "../components/ui/select";
 import { Calendar } from "../components/ui/calendar";
 import { format } from "date-fns";
 import { ko } from "date-fns/locale";
@@ -34,12 +44,29 @@ import {
 import { Progress } from "../components/ui/progress";
 import { toast } from "sonner";
 import { patientApi } from "../../api/patientApi";
+import { procedureApi } from "../../api/procedureApi";
 import { Input } from "../components/ui/input";
 import { Label } from "../components/ui/label";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "../components/ui/dialog";
 import type { PatientDetailOut, PatientMedicationOut, PatientMedicationCreate, MedicationLogOut, StaffNoteOut } from "../../types/patient";
+import { recoveryGuideApi } from "../../api/recoveryGuideApi";
+import type {
+  RecoveryGuideListItem,
+  RecoveryGuideStepOut,
+} from "../../types/recoveryGuide";
+import type { ProcedureMasterOut } from "../../types/procedure";
+interface ProcedureEditForm {
+  procedure_name: string;
+  procedure_date: string;
+  procedure_time: string;
+  notes: string;
+  recovery_guide_id: string;
+  recovery_stage: string;
+  recovery_progress: string;
+}
 
 export function PatientDetailPage() {
+
   const { id } = useParams<{ id: string }>();
   const patientId = Number(id);
   const [viewMode, setViewMode] = useState<"list" | "calendar">("list");
@@ -50,10 +77,11 @@ export function PatientDetailPage() {
   const [medications, setMedications] = useState<PatientMedicationOut[]>([]);
   const [medicationLogs, setMedicationLogs] = useState<MedicationLogOut[]>([]);
   const [notes, setNotes] = useState<StaffNoteOut[]>([]);
+  const [expandedNoteIds, setExpandedNoteIds] = useState<number[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [savingNote, setSavingNote] = useState(false);
-
+  const [recoverySteps, setRecoverySteps] = useState<RecoveryGuideStepOut[]>([]);
   // Edit patient modal
   const [editModalOpen, setEditModalOpen] = useState(false);
   const [savingEdit, setSavingEdit] = useState(false);
@@ -70,22 +98,71 @@ export function PatientDetailPage() {
     purpose: "",
   });
 
+  // Procedure and recovery guide edit modal
+  const [procedureModalOpen, setProcedureModalOpen] = useState(false);
+  const [savingProcedure, setSavingProcedure] = useState(false);
+
+  const [procedureMasters, setProcedureMasters] =
+    useState<ProcedureMasterOut[]>([]);
+
+  const [recoveryGuides, setRecoveryGuides] =
+    useState<RecoveryGuideListItem[]>([]);
+
+  const [selectedGuideSteps, setSelectedGuideSteps] =
+    useState<RecoveryGuideStepOut[]>([]);
+
+  const [procedureForm, setProcedureForm] =
+    useState<ProcedureEditForm>({
+      procedure_name: "",
+      procedure_date: "",
+      procedure_time: "",
+      notes: "",
+      recovery_guide_id: "",
+      recovery_stage: "",
+      recovery_progress: "0",
+    });
   useEffect(() => {
     if (!patientId) return;
     const load = async () => {
       try {
         setLoading(true);
-        const [p, meds, logs, ns] = await Promise.all([
+        const [
+          p,
+          meds,
+          logs,
+          ns,
+          procedureMasterData,
+          recoveryGuideData,
+        ] = await Promise.all([
           patientApi.get(patientId),
           patientApi.getMedications(patientId),
           patientApi.getMedicationLogs(patientId),
           patientApi.getNotes(patientId),
+          procedureApi.list(),
+          recoveryGuideApi.list(),
         ]);
+        let guideSteps: RecoveryGuideStepOut[] = [];
+
+        if (p.procedure?.recovery_guide_id) {
+          try {
+            guideSteps = await recoveryGuideApi.getSteps(
+              p.procedure.recovery_guide_id
+            );
+          } catch (guideError) {
+            console.error(
+              "회복 가이드 단계를 불러오지 못했습니다.",
+              guideError
+            );
+          }
+        }
         setPatient(p);
         setMedications(meds);
         setMedicationLogs(logs);
         setNotes(ns);
-        if (ns.length > 0) setNoteContent(ns[0].content);
+        setRecoverySteps(guideSteps);
+        setProcedureMasters(procedureMasterData);
+        setRecoveryGuides(recoveryGuideData);
+
       } catch (e) {
         setError(e instanceof Error ? e.message : "환자 정보를 불러오지 못했습니다.");
       } finally {
@@ -103,22 +180,46 @@ export function PatientDetailPage() {
   );
   const selectedDateRecords = selectedDate
     ? medicationLogs.filter((r) =>
-        r.scheduled_at.startsWith(format(selectedDate, "yyyy-MM-dd"))
-      )
+      r.scheduled_at.startsWith(format(selectedDate, "yyyy-MM-dd"))
+    )
     : [];
 
   const handleSaveNote = async () => {
-    if (!noteContent.trim() || !patientId) return;
+    const content = noteContent.trim();
+
+    if (!content || !patientId) {
+      toast.error("노트 내용을 입력해주세요.");
+      return;
+    }
+
     try {
       setSavingNote(true);
-      const saved = await patientApi.addNote(patientId, { content: noteContent });
-      setNotes([saved, ...notes]);
+
+      const saved = await patientApi.addNote(patientId, {
+        content,
+      });
+
+      setNotes((previousNotes) => [
+        saved,
+        ...previousNotes,
+      ]);
+
+      setNoteContent("");
+
       toast.success("노트가 저장되었습니다.");
     } catch {
       toast.error("노트 저장에 실패했습니다.");
     } finally {
       setSavingNote(false);
     }
+  };
+
+  const toggleNote = (noteId: number) => {
+    setExpandedNoteIds((previousIds) =>
+      previousIds.includes(noteId)
+        ? previousIds.filter((id) => id !== noteId)
+        : [...previousIds, noteId]
+    );
   };
 
   const handleUpdateMedicationStatus = async (status: string) => {
@@ -141,7 +242,79 @@ export function PatientDetailPage() {
     });
     setEditModalOpen(true);
   };
+  const handleOpenProcedureEdit = async () => {
+    if (!patient?.procedure) {
+      toast.error("수정할 시술 기록이 없습니다.");
+      return;
+    }
 
+    const procedure = patient.procedure;
+    const guideId = procedure.recovery_guide_id;
+
+    let guideSteps: RecoveryGuideStepOut[] = [];
+
+    if (guideId) {
+      try {
+        guideSteps = await recoveryGuideApi.getSteps(guideId);
+      } catch {
+        toast.error("회복 가이드 단계를 불러오지 못했습니다.");
+      }
+    }
+
+    setSelectedGuideSteps(guideSteps);
+
+    setProcedureForm({
+      procedure_name: procedure.procedure_name,
+      procedure_date: procedure.procedure_date,
+      procedure_time: procedure.procedure_time
+        ? String(procedure.procedure_time).substring(0, 5)
+        : "",
+      notes: procedure.notes ?? "",
+      recovery_guide_id: guideId ? String(guideId) : "",
+      recovery_stage: procedure.recovery_stage ?? "",
+      recovery_progress: String(
+        procedure.recovery_progress ?? 0,
+      ),
+    });
+
+    setProcedureModalOpen(true);
+  };
+  const handleRecoveryGuideChange = async (
+    guideIdValue: string,
+  ) => {
+    setProcedureForm((previous) => ({
+      ...previous,
+      recovery_guide_id: guideIdValue,
+      recovery_stage: "",
+      recovery_progress: "0",
+    }));
+
+    if (!guideIdValue) {
+      setSelectedGuideSteps([]);
+      return;
+    }
+
+    try {
+      const steps = await recoveryGuideApi.getSteps(
+        Number(guideIdValue),
+      );
+
+      setSelectedGuideSteps(steps);
+
+      setProcedureForm((previous) => ({
+        ...previous,
+        recovery_guide_id: guideIdValue,
+        recovery_stage:
+          steps.length > 0
+            ? steps[0].time_stage
+            : "",
+        recovery_progress: "0",
+      }));
+    } catch {
+      setSelectedGuideSteps([]);
+      toast.error("회복 가이드 단계를 불러오지 못했습니다.");
+    }
+  };
   const handleSaveEdit = async () => {
     if (!editForm.name.trim() || !editForm.phone.trim()) {
       toast.error("환자명과 휴대폰을 입력해주세요.");
@@ -163,7 +336,95 @@ export function PatientDetailPage() {
       setSavingEdit(false);
     }
   };
+  const handleSaveProcedure = async () => {
+    if (!patient?.procedure) {
+      return;
+    }
 
+    if (!procedureForm.procedure_name.trim()) {
+      toast.error("시술명을 선택해주세요.");
+      return;
+    }
+
+    if (!procedureForm.procedure_date) {
+      toast.error("시술 날짜를 입력해주세요.");
+      return;
+    }
+
+    if (!procedureForm.recovery_guide_id) {
+      toast.error("회복 가이드 템플릿을 선택해주세요.");
+      return;
+    }
+
+    const recoveryProgress = Number(
+      procedureForm.recovery_progress,
+    );
+
+    if (
+      Number.isNaN(recoveryProgress)
+      || recoveryProgress < 0
+      || recoveryProgress > 100
+    ) {
+      toast.error("회복 진행률은 0부터 100 사이여야 합니다.");
+      return;
+    }
+
+    try {
+      setSavingProcedure(true);
+
+      const updatedProcedure =
+        await patientApi.updateProcedure(
+          patientId,
+          patient.procedure.id,
+          {
+            procedure_name:
+              procedureForm.procedure_name,
+            procedure_date:
+              procedureForm.procedure_date,
+            procedure_time:
+              procedureForm.procedure_time
+              || undefined,
+            notes:
+              procedureForm.notes
+              || undefined,
+            recovery_guide_id: Number(
+              procedureForm.recovery_guide_id,
+            ),
+            recovery_stage:
+              procedureForm.recovery_stage
+              || undefined,
+            recovery_progress: recoveryProgress,
+          },
+        );
+
+      setPatient({
+        ...patient,
+        procedure: updatedProcedure,
+      });
+
+      const updatedSteps =
+        updatedProcedure.recovery_guide_id
+          ? await recoveryGuideApi.getSteps(
+            updatedProcedure.recovery_guide_id,
+          )
+          : [];
+
+      setRecoverySteps(updatedSteps);
+      setProcedureModalOpen(false);
+
+      toast.success(
+        "시술 및 회복 정보가 수정되었습니다.",
+      );
+    } catch (error) {
+      toast.error(
+        error instanceof Error
+          ? error.message
+          : "시술 정보 수정에 실패했습니다.",
+      );
+    } finally {
+      setSavingProcedure(false);
+    }
+  };
   const openAddMed = () => {
     setEditingMedId(null);
     setMedForm({ medication_name: "", dosage: "", frequency: "", purpose: "" });
@@ -238,13 +499,33 @@ export function PatientDetailPage() {
   }
 
   const proc = patient.procedure;
-  const recoveryTimeline = [
-    { time: "3시간", title: "즉시 케어", status: "completed" },
-    { time: "12시간", title: "초기 회복", status: proc?.recovery_stage === "12시간" ? "in-progress" : "pending" },
-    { time: "24시간", title: "1일차", status: "pending" },
-    { time: "48시간", title: "2일차", status: "pending" },
-    { time: "7일", title: "1주차 검진", status: "pending" },
-  ];
+  const currentStageIndex = recoverySteps.findIndex(
+    (step) => step.time_stage === proc?.recovery_stage
+  );
+
+  const recoveryTimeline = recoverySteps.map((step, index) => {
+    let status: "completed" | "in-progress" | "pending" = "pending";
+
+    if ((proc?.recovery_progress ?? 0) >= 100) {
+      status = "completed";
+    } else if (currentStageIndex === -1) {
+      status = index === 0 ? "in-progress" : "pending";
+    } else if (index < currentStageIndex) {
+      status = "completed";
+    } else if (index === currentStageIndex) {
+      status = "in-progress";
+    }
+
+    return {
+      id: step.id,
+      time: step.time_stage,
+      title: step.title?.trim() || step.time_stage,
+      precautions: step.precautions,
+      recommendations: step.recommendations,
+      warningSymptoms: step.warning_symptoms,
+      status,
+    };
+  });
 
   return (
     <div className="p-8">
@@ -263,10 +544,25 @@ export function PatientDetailPage() {
             </Link>
           </Button>
           <div className="flex gap-3">
-            <Button variant="outline" className="gap-2 border-border hover:bg-primary hover:text-primary-foreground transition-colors" onClick={handleOpenEdit}>
+            <Button
+              variant="outline"
+              className="gap-2 border-border"
+              onClick={handleOpenEdit}
+            >
               <Edit className="size-4" />
-              정보 수정
+              기본정보 수정
             </Button>
+
+            <Button
+              variant="outline"
+              className="gap-2 border-border"
+              onClick={handleOpenProcedureEdit}
+              disabled={!patient.procedure}
+            >
+              <ClipboardPen className="size-4" />
+              시술·회복 수정
+            </Button>
+
             <Button className="gap-2 bg-gradient-to-r from-primary to-teal-500">
               <Send className="size-4" />
               링크 재발송
@@ -367,32 +663,42 @@ export function PatientDetailPage() {
                     </div>
                   )}
                   <div className="space-y-3 mt-6">
-                    {recoveryTimeline.slice(0, 3).map((stage) => (
-                      <div
-                        key={stage.time}
-                        className={`flex gap-3 p-3 rounded-lg border ${
-                          stage.status === "completed"
+                    {recoveryTimeline.length === 0 ? (
+                      <p className="text-sm text-muted-foreground text-center py-4">
+                        연결된 회복 가이드가 없습니다.
+                      </p>
+                    ) : (
+                      recoveryTimeline.slice(0, 3).map((stage) => (
+                        <div
+                          key={stage.id}
+                          className={`flex gap-3 p-3 rounded-lg border ${stage.status === "completed"
                             ? "bg-teal-50 border-teal-200"
                             : stage.status === "in-progress"
-                            ? "bg-blue-50 border-blue-200"
-                            : "bg-muted border-border"
-                        }`}
-                      >
-                        <div className="flex-shrink-0">
-                          {stage.status === "completed" ? (
-                            <CheckCircle2 className="size-5 text-teal-600" />
-                          ) : stage.status === "in-progress" ? (
-                            <Clock className="size-5 text-blue-600" />
-                          ) : (
-                            <div className="size-5 rounded-full border-2 border-muted-foreground" />
-                          )}
+                              ? "bg-blue-50 border-blue-200"
+                              : "bg-muted border-border"
+                            }`}
+                        >
+                          <div className="flex-shrink-0">
+                            {stage.status === "completed" ? (
+                              <CheckCircle2 className="size-5 text-teal-600" />
+                            ) : stage.status === "in-progress" ? (
+                              <Clock className="size-5 text-blue-600" />
+                            ) : (
+                              <div className="size-5 rounded-full border-2 border-muted-foreground" />
+                            )}
+                          </div>
+
+                          <div className="flex-1">
+                            <p className="font-medium text-sm">
+                              {stage.title}
+                            </p>
+                            <p className="text-xs text-muted-foreground">
+                              {stage.time}
+                            </p>
+                          </div>
                         </div>
-                        <div className="flex-1">
-                          <p className="font-medium text-sm">{stage.title}</p>
-                          <p className="text-xs text-muted-foreground">{stage.time}</p>
-                        </div>
-                      </div>
-                    ))}
+                      ))
+                    )}
                   </div>
                 </CardContent>
               </Card>
@@ -578,7 +884,7 @@ export function PatientDetailPage() {
                         </div>
                         <Progress value={med.adherence} className="h-2" />
                       </div>
-                      <div className="flex gap-2 justify-end opacity-0 group-hover:opacity-100 transition-opacity">
+                      <div className="flex gap-2 justify-end opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity">
                         <Button variant="outline" size="sm" className="gap-1" onClick={() => openEditMed(med)}>
                           <Edit className="size-3" />
                           편집
@@ -660,30 +966,90 @@ export function PatientDetailPage() {
             <Card className="border-border">
               <CardHeader><CardTitle>회복 타임라인</CardTitle></CardHeader>
               <CardContent>
-                <div className="space-y-6">
-                  {recoveryTimeline.map((stage, index) => (
-                    <div key={stage.time} className="flex gap-4">
-                      <div className="flex flex-col items-center">
-                        <div className={`size-10 rounded-full flex items-center justify-center ${
-                          stage.status === "completed" ? "bg-teal-100 text-teal-600"
-                          : stage.status === "in-progress" ? "bg-blue-100 text-blue-600"
-                          : "bg-muted text-muted-foreground"
-                        }`}>
-                          {stage.status === "completed" ? <CheckCircle2 className="size-5" />
-                            : stage.status === "in-progress" ? <Clock className="size-5" />
-                            : <span className="text-sm font-semibold">{index + 1}</span>}
+                {recoveryTimeline.length === 0 ? (
+                  <div className="py-12 text-center">
+                    <Clock className="size-10 mx-auto mb-3 text-muted-foreground opacity-40" />
+                    <p className="text-sm text-muted-foreground">
+                      이 환자에게 연결된 회복 가이드가 없습니다.
+                    </p>
+                  </div>
+                ) : (
+                  <div className="space-y-6">
+                    {recoveryTimeline.map((stage, index) => (
+                      <div key={stage.id} className="flex gap-4">
+                        <div className="flex flex-col items-center">
+                          <div
+                            className={`size-10 rounded-full flex items-center justify-center ${stage.status === "completed"
+                              ? "bg-teal-100 text-teal-600"
+                              : stage.status === "in-progress"
+                                ? "bg-blue-100 text-blue-600"
+                                : "bg-muted text-muted-foreground"
+                              }`}
+                          >
+                            {stage.status === "completed" ? (
+                              <CheckCircle2 className="size-5" />
+                            ) : stage.status === "in-progress" ? (
+                              <Clock className="size-5" />
+                            ) : (
+                              <span className="text-sm font-semibold">
+                                {index + 1}
+                              </span>
+                            )}
+                          </div>
+
+                          {index < recoveryTimeline.length - 1 && (
+                            <div className="w-0.5 h-16 bg-border mt-2" />
+                          )}
                         </div>
-                        {index < recoveryTimeline.length - 1 && <div className="w-0.5 h-16 bg-border mt-2" />}
-                      </div>
-                      <div className="flex-1 pb-8">
-                        <div className="flex items-center gap-3 mb-2">
-                          <h4 className="font-semibold">{stage.title}</h4>
-                          <Badge variant="outline" className="text-xs">{stage.time}</Badge>
+
+                        <div className="flex-1 pb-8">
+                          <div className="flex items-center gap-3 mb-3">
+                            <h4 className="font-semibold">
+                              {stage.title}
+                            </h4>
+
+                            <Badge variant="outline" className="text-xs">
+                              {stage.time}
+                            </Badge>
+                          </div>
+
+                          {stage.precautions && (
+                            <div className="mb-3">
+                              <p className="text-xs font-semibold text-muted-foreground mb-1">
+                                주의사항
+                              </p>
+                              <p className="text-sm whitespace-pre-line">
+                                {stage.precautions}
+                              </p>
+                            </div>
+                          )}
+
+                          {stage.recommendations && (
+                            <div className="mb-3">
+                              <p className="text-xs font-semibold text-muted-foreground mb-1">
+                                권장사항
+                              </p>
+                              <p className="text-sm whitespace-pre-line">
+                                {stage.recommendations}
+                              </p>
+                            </div>
+                          )}
+
+                          {stage.warningSymptoms && (
+                            <div className="rounded-lg border border-destructive/30 bg-destructive/5 p-3">
+                              <p className="text-xs font-semibold text-destructive mb-1">
+                                주의 증상
+                              </p>
+                              <p className="text-sm whitespace-pre-line">
+                                {stage.warningSymptoms}
+                              </p>
+                            </div>
+                          )}
                         </div>
                       </div>
-                    </div>
-                  ))}
-                </div>
+                    ))}
+                  </div>
+                )}
               </CardContent>
             </Card>
           </TabsContent>
@@ -713,14 +1079,55 @@ export function PatientDetailPage() {
                   {savingNote ? "저장 중..." : "노트 저장"}
                 </Button>
                 {notes.length > 0 && (
-                  <div className="space-y-3 mt-4">
-                    <p className="text-sm font-medium text-muted-foreground">이전 노트</p>
-                    {notes.slice(1).map((note) => (
-                      <div key={note.id} className="p-3 rounded-lg bg-muted/30 border border-border">
-                        <p className="text-sm">{note.content}</p>
-                        <p className="text-xs text-muted-foreground mt-1">{note.created_at.substring(0, 16).replace("T", " ")}</p>
-                      </div>
-                    ))}
+                  <div className="space-y-3 mt-6">
+                    <p className="text-sm font-medium text-muted-foreground">
+                      저장된 노트
+                    </p>
+
+                    <div className="space-y-2">
+                      {notes.map((note) => {
+                        const isExpanded = expandedNoteIds.includes(note.id);
+                        const isLongNote = note.content.length > 50;
+
+                        const previewText = isExpanded
+                          ? note.content
+                          : note.content.slice(0, 50);
+
+                        return (
+                          <button
+                            key={note.id}
+                            type="button"
+                            onClick={() => toggleNote(note.id)}
+                            className="w-full text-left rounded-lg border border-border bg-muted/30 hover:bg-muted/50 transition-colors"
+                          >
+                            <div className="flex items-start justify-between gap-4 p-4">
+                              <div className="min-w-0 flex-1">
+                                <p className="text-sm whitespace-pre-wrap break-words">
+                                  {previewText}
+                                  {!isExpanded && isLongNote && "..."}
+                                </p>
+
+                                <p className="text-xs text-muted-foreground mt-2">
+                                  {note.created_at
+                                    .substring(0, 16)
+                                    .replace("T", " ")}
+                                </p>
+                              </div>
+
+                              {isLongNote && (
+                                <div className="flex-shrink-0 text-muted-foreground mt-0.5">
+                                  {isExpanded ? (
+                                    <ChevronUp className="size-4" />
+                                  ) : (
+                                    <ChevronDown className="size-4" />
+                                  )}
+                                </div>
+                              )}
+                            </div>
+                          </button>
+                        );
+                      })}
+                    </div>
                   </div>
                 )}
               </CardContent>
@@ -729,45 +1136,214 @@ export function PatientDetailPage() {
         </Tabs>
 
         {/* Patient Edit Dialog */}
-        <Dialog open={editModalOpen} onOpenChange={setEditModalOpen}>
-          <DialogContent>
+        <Dialog
+          open={procedureModalOpen}
+          onOpenChange={setProcedureModalOpen}
+        >
+          <DialogContent className="sm:max-w-2xl max-h-[90vh] overflow-y-auto">
             <DialogHeader>
-              <DialogTitle>환자 정보 수정</DialogTitle>
+              <DialogTitle>
+                시술 및 회복 정보 수정
+              </DialogTitle>
             </DialogHeader>
-            <div className="space-y-4 py-2">
+
+            <div className="space-y-5 py-2">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label>시술명 *</Label>
+
+                  <Select
+                    value={procedureForm.procedure_name}
+                    onValueChange={(value) =>
+                      setProcedureForm({
+                        ...procedureForm,
+                        procedure_name: value,
+                      })
+                    }
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="시술 선택" />
+                    </SelectTrigger>
+
+                    <SelectContent>
+                      {procedureMasters.length === 0 ? (
+                        <SelectItem
+                          value="__none"
+                          disabled
+                        >
+                          등록된 시술이 없습니다
+                        </SelectItem>
+                      ) : (
+                        procedureMasters.map((procedure) => (
+                          <SelectItem
+                            key={procedure.id}
+                            value={procedure.name}
+                          >
+                            {procedure.name}
+                          </SelectItem>
+                        ))
+                      )}
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <div className="space-y-2">
+                  <Label>시술 날짜 *</Label>
+
+                  <Input
+                    type="date"
+                    value={procedureForm.procedure_date}
+                    onChange={(event) =>
+                      setProcedureForm({
+                        ...procedureForm,
+                        procedure_date: event.target.value,
+                      })
+                    }
+                  />
+                </div>
+              </div>
+
               <div className="space-y-2">
-                <Label>환자명</Label>
+                <Label>시술 시간</Label>
+
                 <Input
-                  value={editForm.name}
-                  onChange={(e) => setEditForm({ ...editForm, name: e.target.value })}
-                  placeholder="홍길동"
+                  type="time"
+                  value={procedureForm.procedure_time}
+                  onChange={(event) =>
+                    setProcedureForm({
+                      ...procedureForm,
+                      procedure_time: event.target.value,
+                    })
+                  }
                 />
               </div>
+
               <div className="space-y-2">
-                <Label>휴대폰 번호</Label>
-                <Input
-                  value={editForm.phone}
-                  onChange={(e) => setEditForm({ ...editForm, phone: e.target.value })}
-                  placeholder="010-1234-5678"
+                <Label>시술 노트</Label>
+
+                <Textarea
+                  value={procedureForm.notes}
+                  onChange={(event) =>
+                    setProcedureForm({
+                      ...procedureForm,
+                      notes: event.target.value,
+                    })
+                  }
+                  placeholder="시술 관련 특이사항을 입력하세요."
+                  className="min-h-[100px]"
                 />
               </div>
+
               <div className="space-y-2">
-                <Label>생년월일 (선택)</Label>
-                <Input
-                  type="date"
-                  value={editForm.birthdate}
-                  onChange={(e) => setEditForm({ ...editForm, birthdate: e.target.value })}
-                />
+                <Label>회복 가이드 템플릿 *</Label>
+
+                <Select
+                  value={procedureForm.recovery_guide_id}
+                  onValueChange={handleRecoveryGuideChange}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="회복 가이드 선택" />
+                  </SelectTrigger>
+
+                  <SelectContent>
+                    {recoveryGuides.length === 0 ? (
+                      <SelectItem
+                        value="__none"
+                        disabled
+                      >
+                        등록된 회복 가이드가 없습니다
+                      </SelectItem>
+                    ) : (
+                      recoveryGuides.map((guide) => (
+                        <SelectItem
+                          key={guide.id}
+                          value={String(guide.id)}
+                        >
+                          {guide.name}
+                          {guide.stages > 0
+                            ? ` · ${guide.stages}단계`
+                            : ""}
+                        </SelectItem>
+                      ))
+                    )}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label>현재 회복 단계</Label>
+
+                  <Select
+                    value={procedureForm.recovery_stage}
+                    onValueChange={(value) =>
+                      setProcedureForm({
+                        ...procedureForm,
+                        recovery_stage: value,
+                      })
+                    }
+                    disabled={
+                      selectedGuideSteps.length === 0
+                    }
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="회복 단계 선택" />
+                    </SelectTrigger>
+
+                    <SelectContent>
+                      {selectedGuideSteps.map((step) => (
+                        <SelectItem
+                          key={step.id}
+                          value={step.time_stage}
+                        >
+                          {step.title
+                            ? `${step.title} · ${step.time_stage}`
+                            : step.time_stage}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <div className="space-y-2">
+                  <Label>회복 진행률 (%)</Label>
+
+                  <Input
+                    type="number"
+                    min="0"
+                    max="100"
+                    step="1"
+                    value={procedureForm.recovery_progress}
+                    onChange={(event) =>
+                      setProcedureForm({
+                        ...procedureForm,
+                        recovery_progress:
+                          event.target.value,
+                      })
+                    }
+                  />
+                </div>
               </div>
             </div>
+
             <DialogFooter>
-              <Button variant="outline" onClick={() => setEditModalOpen(false)}>취소</Button>
               <Button
-                className="bg-gradient-to-r from-primary to-teal-500"
-                onClick={handleSaveEdit}
-                disabled={savingEdit}
+                variant="outline"
+                onClick={() =>
+                  setProcedureModalOpen(false)
+                }
               >
-                {savingEdit ? "저장 중..." : "저장"}
+                취소
+              </Button>
+
+              <Button
+                onClick={handleSaveProcedure}
+                disabled={savingProcedure}
+                className="bg-gradient-to-r from-primary to-teal-500"
+              >
+                {savingProcedure
+                  ? "저장 중..."
+                  : "시술 정보 저장"}
               </Button>
             </DialogFooter>
           </DialogContent>

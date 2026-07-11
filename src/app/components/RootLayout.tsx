@@ -28,9 +28,21 @@ const navItems = [
 export function RootLayout() {
   const location = useLocation();
   const navigate = useNavigate();
+  const userName =
+    localStorage.getItem("derm_user_name") || "사용자";
+
+  const userRole =
+    localStorage.getItem("derm_user_role") || "staff";
+
+  const roleLabel =
+    userRole === "admin" ? "클리닉 관리자" : "클리닉 스태프";
 
   const handleLogout = () => {
-    navigate("/login");
+    localStorage.removeItem("derm_token");
+    localStorage.removeItem("derm_user_name");
+    localStorage.removeItem("derm_user_role");
+
+    navigate("/login", { replace: true });
   };
 
   return (
@@ -87,15 +99,15 @@ export function RootLayout() {
           <div className="flex items-center gap-3 px-2 py-2 rounded-lg">
             <Avatar className="size-10 border-2 border-primary/20">
               <AvatarFallback className="bg-primary/10 text-primary font-semibold">
-                관리
+                {userName.slice(0, 2)}
               </AvatarFallback>
             </Avatar>
             <div className="flex-1 min-w-0">
               <p className="font-semibold text-sm text-sidebar-foreground truncate">
-                클리닉 관리자
+                {userName}
               </p>
               <p className="text-xs text-muted-foreground truncate">
-                admin@dermcompanion.kr
+                {roleLabel}
               </p>
             </div>
             <Button

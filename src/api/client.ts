@@ -5,10 +5,12 @@ async function request<T>(
   options: RequestInit = {}
 ): Promise<T> {
   const token = localStorage.getItem("derm_token");
+
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
     ...(options.headers as Record<string, string>),
   };
+
   if (token) {
     headers["Authorization"] = `Bearer ${token}`;
   }
@@ -18,13 +20,33 @@ async function request<T>(
     headers,
   });
 
-  if (!res.ok) {
-    const error = await res.json().catch(() => ({ detail: "알 수 없는 오류" }));
-    throw new Error(error.detail ?? `HTTP ${res.status}`);
+  if (res.status === 401 && path !== "/auth/login") {
+    localStorage.removeItem("derm_token");
+    localStorage.removeItem("derm_user_name");
+    localStorage.removeItem("derm_user_role");
+
+    if (window.location.pathname !== "/login") {
+      window.location.replace("/login");
+    }
+
+    throw new Error("로그인 세션이 만료되었습니다.");
   }
 
-  // 204 No Content
-  if (res.status === 204) return undefined as T;
+  if (!res.ok) {
+    const error = await res
+      .json()
+      .catch(() => ({
+        detail: "알 수 없는 오류",
+      }));
+
+    throw new Error(
+      error.detail ?? `HTTP ${res.status}`
+    );
+  }
+
+  if (res.status === 204) {
+    return undefined as T;
+  }
 
   return res.json();
 }

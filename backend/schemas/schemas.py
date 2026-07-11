@@ -54,6 +54,15 @@ class ProcedureBase(BaseModel):
 class ProcedureCreate(ProcedureBase):
     patient_id: int
 
+class ProcedureUpdate(BaseModel):
+    procedure_name: Optional[str] = None
+    procedure_date: Optional[date] = None
+    procedure_time: Optional[time] = None
+    notes: Optional[str] = None
+    recovery_stage: Optional[str] = None
+    recovery_progress: Optional[float] = None
+    recovery_guide_id: Optional[int] = None
+    
 class ProcedureOut(ProcedureBase):
     id: int
     patient_id: int

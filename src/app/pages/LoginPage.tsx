@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useNavigate } from "react-router";
 import { motion } from "motion/react";
 import { Activity, Lock, Mail } from "lucide-react";
@@ -13,6 +13,13 @@ export function LoginPage() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
+  useEffect(() => {
+    const token = localStorage.getItem("derm_token");
+
+    if (token) {
+      navigate("/", { replace: true });
+    }
+  }, [navigate]);
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -21,7 +28,9 @@ export function LoginPage() {
       const res = await authApi.login({ email, password });
       localStorage.setItem("derm_token", res.access_token);
       localStorage.setItem("derm_user_name", res.user_name);
-      navigate("/");
+      localStorage.setItem("derm_user_role", res.user_role);
+
+      navigate("/", { replace: true });
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "로그인에 실패했습니다.");
     } finally {

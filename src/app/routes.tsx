@@ -9,6 +9,7 @@ import { ClinicInfoPage } from "./pages/ClinicInfoPage";
 import { RecoveryGuidePage } from "./pages/RecoveryGuidePage";
 import { MedicationListPage } from "./pages/MedicationListPage";
 import { ProcedureListPage } from "./pages/ProcedureListPage";
+import { ProtectedRoute } from "./components/ProtectedRoute";
 
 export const router = createBrowserRouter([
   {
@@ -16,17 +17,22 @@ export const router = createBrowserRouter([
     Component: LoginPage,
   },
   {
-    path: "/",
-    Component: RootLayout,
+    Component: ProtectedRoute,
     children: [
-      { index: true, Component: DashboardPage },
-      { path: "patients", Component: PatientListPage },
-      { path: "patients/:id", Component: PatientDetailPage },
-      { path: "register", Component: PatientRegistrationPage },
-      { path: "clinic-info", Component: ClinicInfoPage },
-      { path: "recovery-guide", Component: RecoveryGuidePage },
-      { path: "medications", Component: MedicationListPage },
-      { path: "procedure-types", Component: ProcedureListPage },
+      {
+        path: "/",
+        Component: RootLayout,
+        children: [
+          { index: true, Component: DashboardPage },
+          { path: "patients", Component: PatientListPage },
+          { path: "patients/:id", Component: PatientDetailPage },
+          { path: "register", Component: PatientRegistrationPage },
+          { path: "clinic-info", Component: ClinicInfoPage },
+          { path: "recovery-guide", Component: RecoveryGuidePage },
+          { path: "medications", Component: MedicationListPage },
+          { path: "procedure-types", Component: ProcedureListPage },
+        ],
+      },
     ],
   },
 ]);

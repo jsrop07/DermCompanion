@@ -12,6 +12,8 @@ import { useNavigate } from "react-router";
 import { medicationApi } from "../../api/medicationApi";
 import { patientApi } from "../../api/patientApi";
 import { procedureApi } from "../../api/procedureApi";
+import { recoveryGuideApi } from "../../api/recoveryGuideApi";
+import type { RecoveryGuideListItem } from "../../types/recoveryGuide";
 import type { MedicationMasterOut } from "../../types/medication";
 import type { ProcedureMasterOut } from "../../types/procedure";
 
@@ -31,6 +33,9 @@ export function PatientRegistrationPage() {
   const [commonMedications, setCommonMedications] = useState<MedicationMasterOut[]>([]);
   const [procedures, setProcedures] = useState<ProcedureMasterOut[]>([]);
   const [selectedProcedureName, setSelectedProcedureName] = useState("");
+  const [recoveryGuides, setRecoveryGuides] = useState<RecoveryGuideListItem[]>([]);
+
+  const [selectedRecoveryGuideId, setSelectedRecoveryGuideId] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [medications, setMedications] = useState<Medication[]>([
     { id: 1, name: "", dosage: "", frequency: "", purpose: "", isCustom: true },
@@ -38,8 +43,25 @@ export function PatientRegistrationPage() {
 
   // 약물 마스터 로드
   useEffect(() => {
-    medicationApi.list().then(setCommonMedications).catch(() => {});
-    procedureApi.list().then(setProcedures).catch(() => {});
+    const loadRegistrationData = async () => {
+      try {
+        const [medicationData, procedureData, recoveryGuideData] =
+          await Promise.all([
+            medicationApi.list(),
+            procedureApi.list(),
+            recoveryGuideApi.list(),
+          ]);
+
+        setCommonMedications(medicationData);
+        setProcedures(procedureData);
+        setRecoveryGuides(recoveryGuideData);
+      } catch (error) {
+        toast.error("환자 등록에 필요한 데이터를 불러오지 못했습니다.");
+        console.error(error);
+      }
+    };
+
+    loadRegistrationData();
   }, []);
 
   const addMedication = () => {
@@ -101,6 +123,10 @@ export function PatientRegistrationPage() {
       toast.error("시술명과 시술 날짜는 필수입니다.");
       return;
     }
+    if (!selectedRecoveryGuideId) {
+      toast.error("회복 가이드 템플릿을 선택해주세요.");
+      return;
+    }
     try {
       setSubmitting(true);
       const patient = await patientApi.create({
@@ -116,6 +142,7 @@ export function PatientRegistrationPage() {
           procedure_date: procedureDateEl.value,
           procedure_time: procedureTimeEl?.value || undefined,
           notes: notesEl?.value || undefined,
+          recovery_guide_id: Number(selectedRecoveryGuideId),
         });
       }
       // 복약 추가
@@ -371,15 +398,33 @@ export function PatientRegistrationPage() {
             <CardContent className="space-y-4">
               <div className="space-y-2">
                 <Label htmlFor="recoveryTemplate">템플릿 선택</Label>
-                <Select>
-                  <SelectTrigger className="bg-input-background border-border">
+                <Select
+                  value={selectedRecoveryGuideId}
+                  onValueChange={setSelectedRecoveryGuideId}
+                >
+                  <SelectTrigger
+                    id="recoveryTemplate"
+                    className="bg-input-background border-border"
+                  >
                     <SelectValue placeholder="회복 가이드 템플릿 선택" />
                   </SelectTrigger>
+
                   <SelectContent>
-                    <SelectItem value="standard-laser">표준 레이저 회복</SelectItem>
-                    <SelectItem value="botox-filler">보톡스/필러 회복</SelectItem>
-                    <SelectItem value="intensive-treatment">집중 치료 회복</SelectItem>
-                    <SelectItem value="custom">커스텀 가이드</SelectItem>
+                    {recoveryGuides.length === 0 ? (
+                      <SelectItem value="__none" disabled>
+                        등록된 회복 가이드가 없습니다
+                      </SelectItem>
+                    ) : (
+                      recoveryGuides.map((guide) => (
+                        <SelectItem
+                          key={guide.id}
+                          value={String(guide.id)}
+                        >
+                          {guide.name}
+                          {guide.stages > 0 ? ` · ${guide.stages}단계` : ""}
+                        </SelectItem>
+                      ))
+                    )}
                   </SelectContent>
                 </Select>
               </div>

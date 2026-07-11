@@ -1,9 +1,19 @@
 import { apiClient } from "./client";
 import type {
-  PatientListItem, PatientDetailOut, PatientCreate, PatientUpdate,
-  PatientMedicationCreate, PatientMedicationOut,
-  MedicationLogCreate, MedicationLogOut, MedicationLogCalendarItem,
-  StaffNoteCreate, StaffNoteOut, ProcedureOut,
+  PatientListItem,
+  PatientDetailOut,
+  PatientCreate,
+  PatientUpdate,
+  PatientMedicationCreate,
+  PatientMedicationOut,
+  MedicationLogCreate,
+  MedicationLogOut,
+  MedicationLogCalendarItem,
+  StaffNoteCreate,
+  StaffNoteOut,
+  ProcedureOut,
+  ProcedureCreate,
+  ProcedureUpdate,
 } from "../types/patient";
 
 export const patientApi = {
@@ -19,8 +29,10 @@ export const patientApi = {
   update: (id: number, data: PatientUpdate) =>
     apiClient.put<PatientDetailOut>(`/patients/${id}`, data),
   delete: (id: number) => apiClient.delete<void>(`/patients/${id}`),
-  addProcedure: (patientId: number, data: { patient_id: number; procedure_name: string; procedure_date: string; procedure_time?: string; notes?: string }) =>
+  addProcedure: (patientId: number, data: ProcedureCreate) =>
     apiClient.post<ProcedureOut>(`/patients/${patientId}/procedures`, data),
+  updateProcedure: (patientId: number, procedureId: number, data: ProcedureUpdate) =>
+    apiClient.put<ProcedureOut>(`/patients/${patientId}/procedures/${procedureId}`, data),
 
   // medications
   getMedications: (patientId: number) =>

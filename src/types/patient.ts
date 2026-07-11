@@ -22,6 +22,27 @@ export interface ProcedureOut {
   created_at: string;
 }
 
+export interface ProcedureCreate {
+  patient_id: number;
+  procedure_name: string;
+  procedure_date: string;
+  procedure_time?: string;
+  notes?: string;
+  recovery_stage?: string;
+  recovery_progress?: number;
+  recovery_guide_id?: number;
+}
+
+export interface ProcedureUpdate {
+  procedure_name?: string;
+  procedure_date?: string;
+  procedure_time?: string;
+  notes?: string;
+  recovery_stage?: string;
+  recovery_progress?: number;
+  recovery_guide_id?: number | null;
+}
+
 export interface PatientDetailOut {
   id: number;
   name: string;
@@ -42,6 +63,7 @@ export interface PatientUpdate {
   name?: string;
   phone?: string;
   birthdate?: string;
+  medication_status_override?: string;
 }
 
 export interface PatientMedicationOut {
