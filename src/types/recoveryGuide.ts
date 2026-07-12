@@ -2,6 +2,7 @@ export interface RecoveryGuideStepOut {
   id: number;
   guide_id: number;
   time_stage: string;
+  offset_minutes: number;
   title?: string;
   precautions?: string;
   recommendations?: string;
@@ -11,6 +12,7 @@ export interface RecoveryGuideStepOut {
 
 export interface RecoveryGuideStepCreate {
   time_stage: string;
+  offset_minutes: number;
   title?: string;
   precautions?: string;
   recommendations?: string;

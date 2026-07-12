@@ -1,4 +1,6 @@
-from datetime import datetime, timedelta
+import os
+from datetime import datetime, timedelta, time
+from zoneinfo import ZoneInfo
 from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
@@ -18,7 +20,7 @@ from schemas.schemas import (
     PatientCreate, PatientUpdate, PatientOut, PatientDetailOut, PatientListItem,
     PatientMedicationCreate, PatientMedicationOut,
     MedicationLogCreate, MedicationLogOut, MedicationLogCalendarItem,
-    StaffNoteCreate, StaffNoteOut,
+    StaffNoteCreate, StaffNoteUpdate, StaffNoteOut,
     ProcedureCreate, ProcedureUpdate, ProcedureOut,
 )
 
@@ -46,6 +48,129 @@ def _relative_time(dt: datetime) -> str:
     else:
         return f"{diff.days}일 전"
 
+def _clinic_now() -> datetime:
+    timezone_name = os.getenv(
+        "CLINIC_TIMEZONE",
+        "Asia/Seoul",
+    )
+
+    return (
+        datetime.now(ZoneInfo(timezone_name))
+        .replace(tzinfo=None)
+    )
+
+
+def _calculate_recovery_state(
+    procedure: Optional[Procedure],
+) -> tuple[Optional[str], float]:
+    if (
+        not procedure
+        or not procedure.recovery_guide
+        or not procedure.recovery_guide.steps
+    ):
+        return (
+            procedure.recovery_stage
+            if procedure
+            else None,
+            procedure.recovery_progress or 0.0
+            if procedure
+            else 0.0,
+        )
+
+    valid_steps = [
+        step
+        for step in procedure.recovery_guide.steps
+        if step.offset_minutes is not None
+    ]
+
+    if not valid_steps:
+        return (
+            procedure.recovery_stage,
+            procedure.recovery_progress or 0.0,
+        )
+
+    steps = sorted(
+        valid_steps,
+        key=lambda step: (
+            step.offset_minutes,
+            step.sort_order or 0,
+            step.id,
+        ),
+    )
+
+    procedure_time = (
+        procedure.procedure_time
+        or time(hour=0, minute=0)
+    )
+
+    started_at = datetime.combine(
+        procedure.procedure_date,
+        procedure_time,
+    )
+
+    elapsed_minutes = max(
+        0.0,
+        (
+            _clinic_now() - started_at
+        ).total_seconds() / 60,
+    )
+
+    final_offset = max(
+        steps[-1].offset_minutes or 0,
+        1,
+    )
+
+    if elapsed_minutes >= final_offset:
+        return (
+            steps[-1].time_stage,
+            100.0,
+        )
+
+    current_step = steps[0]
+
+    for step in steps:
+        step_offset = step.offset_minutes or 0
+
+        if elapsed_minutes >= step_offset:
+            current_step = step
+        else:
+            break
+
+    progress = min(
+        99.9,
+        max(
+            0.0,
+            elapsed_minutes
+            / final_offset
+            * 100,
+        ),
+    )
+
+    return (
+        current_step.time_stage,
+        round(progress, 1),
+    )
+
+
+def _build_procedure_out(
+    procedure: Procedure,
+) -> ProcedureOut:
+    recovery_stage, recovery_progress = (
+        _calculate_recovery_state(procedure)
+    )
+
+    return (
+        ProcedureOut
+        .model_validate(procedure)
+        .model_copy(
+            update={
+                "recovery_stage":
+                    recovery_stage,
+                "recovery_progress":
+                    recovery_progress,
+            }
+        )
+    )
 
 # ─── Patient CRUD ───────────────────────────────────────
 
@@ -66,7 +191,9 @@ def list_patients(
     for p in patients:
         proc = p.procedures[-1] if p.procedures else None
         med_status = _med_status(p, db)
-
+        recovery_stage, recovery_progress = (
+            _calculate_recovery_state(proc)
+        )
         # Today filter: compare created_at date (UTC) with today's date (UTC)
         if status_filter == "today":
             if p.created_at.date() != today:
@@ -80,10 +207,11 @@ def list_patients(
 
         # Recovery filters
         if status_filter == "recovering":
-            if not proc or (proc.recovery_progress or 0) >= 100:
+            if not proc or recovery_progress >= 100:
                 continue
+
         if status_filter == "completed":
-            if not proc or (proc.recovery_progress or 0) < 100:
+            if not proc or recovery_progress < 100:
                 continue
 
         result.append(PatientListItem(
@@ -91,7 +219,7 @@ def list_patients(
             name=p.name,
             procedure=proc.procedure_name if proc else None,
             date=str(proc.procedure_date) if proc else None,
-            stage=proc.recovery_stage if proc else None,
+            stage=recovery_stage,
             medicationStatus=med_status,
             lastUpdate=_relative_time(p.updated_at),
             createdAt=str(p.created_at.date()),
@@ -124,7 +252,7 @@ def get_patient(patient_id: int, db: Session = Depends(get_db)):
         phone=patient.phone,
         birthdate=patient.birthdate,
         created_at=patient.created_at,
-        procedure=ProcedureOut.model_validate(proc) if proc else None,
+        procedure=_build_procedure_out(proc) if proc else None,
         medication_status=med_status,
     )
 
@@ -303,7 +431,7 @@ def add_procedure(
     db.commit()
     db.refresh(proc)
 
-    return proc
+    return _build_procedure_out(proc)
 
 @router.put(
     "/{patient_id}/procedures/{procedure_id}",
@@ -325,9 +453,15 @@ def update_patient_procedure(
     )
 
     if not procedure:
-        raise HTTPException(
-            status_code=404,
-            detail="시술 기록을 찾을 수 없습니다.",
+        return None, 0.0
+
+    if (
+        not procedure.recovery_guide
+        or not procedure.recovery_guide.steps
+    ):
+        return (
+            procedure.recovery_stage,
+            procedure.recovery_progress or 0.0,
         )
 
     update_data = data.model_dump(exclude_unset=True)
@@ -378,7 +512,7 @@ def update_patient_procedure(
     db.commit()
     db.refresh(procedure)
 
-    return procedure
+    return _build_procedure_out(procedure)
 # ─── Staff Notes ────────────────────────────────────────
 
 @router.get("/{patient_id}/notes", response_model=List[StaffNoteOut])
@@ -398,3 +532,71 @@ def create_note(patient_id: int, data: StaffNoteCreate, db: Session = Depends(ge
     db.commit()
     db.refresh(note)
     return note
+
+@router.put(
+    "/{patient_id}/notes/{note_id}",
+    response_model=StaffNoteOut,
+)
+def update_note(
+    patient_id: int,
+    note_id: int,
+    data: StaffNoteUpdate,
+    db: Session = Depends(get_db),
+):
+    note = (
+        db.query(StaffNote)
+        .filter(
+            StaffNote.id == note_id,
+            StaffNote.patient_id == patient_id,
+        )
+        .first()
+    )
+
+    if not note:
+        raise HTTPException(
+            status_code=404,
+            detail="노트를 찾을 수 없습니다.",
+        )
+
+    content = data.content.strip()
+
+    if not content:
+        raise HTTPException(
+            status_code=400,
+            detail="노트 내용을 입력해주세요.",
+        )
+
+    note.content = content
+    note.updated_at = datetime.utcnow()
+
+    db.commit()
+    db.refresh(note)
+
+    return note
+
+@router.delete(
+    "/{patient_id}/notes/{note_id}",
+    status_code=204,
+)
+def delete_note(
+    patient_id: int,
+    note_id: int,
+    db: Session = Depends(get_db),
+):
+    note = (
+        db.query(StaffNote)
+        .filter(
+            StaffNote.id == note_id,
+            StaffNote.patient_id == patient_id,
+        )
+        .first()
+    )
+
+    if not note:
+        raise HTTPException(
+            status_code=404,
+            detail="노트를 찾을 수 없습니다.",
+        )
+
+    db.delete(note)
+    db.commit()

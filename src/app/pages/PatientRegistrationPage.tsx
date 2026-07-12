@@ -40,7 +40,24 @@ export function PatientRegistrationPage() {
   const [medications, setMedications] = useState<Medication[]>([
     { id: 1, name: "", dosage: "", frequency: "", purpose: "", isCustom: true },
   ]);
+  useEffect(() => {
+    const previousHtmlOverflow =
+      document.documentElement.style.overflow;
 
+    const previousBodyOverflow =
+      document.body.style.overflow;
+
+    document.documentElement.style.overflow = "hidden";
+    document.body.style.overflow = "hidden";
+
+    return () => {
+      document.documentElement.style.overflow =
+        previousHtmlOverflow;
+
+      document.body.style.overflow =
+        previousBodyOverflow;
+    };
+  }, []);
   // 약물 마스터 로드
   useEffect(() => {
     const loadRegistrationData = async () => {
@@ -136,14 +153,29 @@ export function PatientRegistrationPage() {
       });
       // 시술 추가
       if (selectedProcedureName && procedureDateEl?.value) {
+        const procedureNote =
+          notesEl?.value.trim() ?? "";
+
         await patientApi.addProcedure(patient.id, {
           patient_id: patient.id,
           procedure_name: selectedProcedureName,
           procedure_date: procedureDateEl.value,
-          procedure_time: procedureTimeEl?.value || undefined,
-          notes: notesEl?.value || undefined,
-          recovery_guide_id: Number(selectedRecoveryGuideId),
+          procedure_time:
+            procedureTimeEl?.value || undefined,
+          notes: procedureNote || undefined,
+          recovery_guide_id: Number(
+            selectedRecoveryGuideId,
+          ),
         });
+        if (!procedureTimeEl?.value) {
+          toast.error("시술 시간을 입력해주세요.");
+          return;
+        }
+        if (procedureNote) {
+          await patientApi.addNote(patient.id, {
+            content: `[시술 노트]\n${procedureNote}`,
+          });
+        }
       }
       // 복약 추가
       for (const med of medications) {
@@ -166,13 +198,16 @@ export function PatientRegistrationPage() {
   };
 
   return (
-    <div className="p-8 max-w-5xl mx-auto">
+    <div className="w-full max-w-5xl mx-auto p-8">
       <motion.div
-        initial={{ opacity: 0, y: 20 }}
-        animate={{ opacity: 1, y: 0 }}
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
         transition={{ duration: 0.4 }}
       >
-        <form onSubmit={handleSubmit} className="space-y-6">
+        <form
+          onSubmit={handleSubmit}
+          className="w-full min-w-0 space-y-6"
+        >
           {/* Patient Basic Information */}
           <Card className="border-border">
             <CardHeader>
@@ -247,7 +282,11 @@ export function PatientRegistrationPage() {
                     id="procedureDate"
                     type="date"
                     className="bg-input-background border-border"
-                    defaultValue="2026-04-23"
+                    defaultValue={
+                      new Date().toLocaleDateString(
+                        "sv-SE",
+                      )
+                    }
                     required
                   />
                 </div>
@@ -258,6 +297,7 @@ export function PatientRegistrationPage() {
                   id="procedureTime"
                   type="time"
                   className="bg-input-background border-border"
+                  required
                 />
               </div>
               <div className="space-y-2">
@@ -432,7 +472,7 @@ export function PatientRegistrationPage() {
           </Card>
 
           {/* Action Buttons */}
-          <div className="flex gap-4 justify-end sticky bottom-0 bg-background/80 backdrop-blur-sm p-4 -mx-4 border-t border-border">
+          <div className="mt-6 flex gap-4 justify-end border-t border-border pt-4">
             <Button
               type="button"
               variant="outline"

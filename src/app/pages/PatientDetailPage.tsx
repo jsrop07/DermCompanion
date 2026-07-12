@@ -78,6 +78,10 @@ export function PatientDetailPage() {
   const [medicationLogs, setMedicationLogs] = useState<MedicationLogOut[]>([]);
   const [notes, setNotes] = useState<StaffNoteOut[]>([]);
   const [expandedNoteIds, setExpandedNoteIds] = useState<number[]>([]);
+  const [editingNoteId, setEditingNoteId] = useState<number | null>(null);
+  const [editingNoteContent, setEditingNoteContent] = useState("");
+  const [savingEditedNote, setSavingEditedNote] = useState(false);
+  const [deletingNoteId, setDeletingNoteId] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [savingNote, setSavingNote] = useState(false);
@@ -171,7 +175,32 @@ export function PatientDetailPage() {
     };
     load();
   }, [patientId]);
+  useEffect(() => {
+    if (!patientId) {
+      return;
+    }
 
+    const intervalId = window.setInterval(
+      async () => {
+        try {
+          const updatedPatient =
+            await patientApi.get(patientId);
+
+          setPatient(updatedPatient);
+        } catch (error) {
+          console.error(
+            "회복 상태 자동 갱신 실패",
+            error,
+          );
+        }
+      },
+      60 * 1000,
+    );
+
+    return () => {
+      window.clearInterval(intervalId);
+    };
+  }, [patientId]);
   const datesWithRecords = new Set(
     medicationLogs.map((r) => r.scheduled_at.split("T")[0].substring(0, 10))
   );
@@ -222,6 +251,95 @@ export function PatientDetailPage() {
     );
   };
 
+  const handleOpenNoteEdit = (
+    note: StaffNoteOut,
+  ) => {
+    setEditingNoteId(note.id);
+    setEditingNoteContent(note.content);
+  };
+
+  const handleSaveNoteEdit = async () => {
+    const content = editingNoteContent.trim();
+
+    if (!editingNoteId || !content) {
+      toast.error("노트 내용을 입력해주세요.");
+      return;
+    }
+
+    try {
+      setSavingEditedNote(true);
+
+      const updatedNote =
+        await patientApi.updateNote(
+          patientId,
+          editingNoteId,
+          { content },
+        );
+
+      setNotes((previousNotes) =>
+        previousNotes.map((note) =>
+          note.id === updatedNote.id
+            ? updatedNote
+            : note,
+        ),
+      );
+
+      setEditingNoteId(null);
+      setEditingNoteContent("");
+
+      toast.success("노트가 수정되었습니다.");
+    } catch (error) {
+      toast.error(
+        error instanceof Error
+          ? error.message
+          : "노트 수정에 실패했습니다.",
+      );
+    } finally {
+      setSavingEditedNote(false);
+    }
+  };
+  const handleDeleteNote = async (
+    noteId: number,
+  ) => {
+    const confirmed = window.confirm(
+      "이 노트를 삭제하시겠습니까?",
+    );
+
+    if (!confirmed) {
+      return;
+    }
+
+    try {
+      setDeletingNoteId(noteId);
+
+      await patientApi.deleteNote(
+        patientId,
+        noteId,
+      );
+
+      setNotes((previousNotes) =>
+        previousNotes.filter(
+          (note) => note.id !== noteId,
+        ),
+      );
+
+      setExpandedNoteIds((previousIds) =>
+        previousIds.filter(
+          (id) => id !== noteId,
+        ),
+      );
+
+      toast.success("노트가 삭제되었습니다.");
+    } catch (error) {
+      toast.error(
+        error instanceof Error
+          ? error.message
+          : "노트 삭제에 실패했습니다.",
+      );
+    } finally {
+      setDeletingNoteId(null);
+    }
+  };
   const handleUpdateMedicationStatus = async (status: string) => {
     if (!patientId || !patient) return;
     try {
@@ -877,13 +995,6 @@ export function PatientDetailPage() {
                         <div><p className="text-sm text-muted-foreground mb-1">복용 빈도</p><p className="font-semibold">{med.frequency ?? "-"}</p></div>
                         <div><p className="text-sm text-muted-foreground mb-1">목적</p><p className="font-semibold">{med.purpose ?? "-"}</p></div>
                       </div>
-                      <div className="mb-3">
-                        <div className="flex items-center justify-between mb-1">
-                          <span className="text-sm text-muted-foreground">복약 순응도</span>
-                          <span className="text-sm font-medium">{med.adherence}%</span>
-                        </div>
-                        <Progress value={med.adherence} className="h-2" />
-                      </div>
                       <div className="flex gap-2 justify-end opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity">
                         <Button variant="outline" size="sm" className="gap-1" onClick={() => openEditMed(med)}>
                           <Edit className="size-3" />
@@ -1086,22 +1197,28 @@ export function PatientDetailPage() {
 
                     <div className="space-y-2">
                       {notes.map((note) => {
-                        const isExpanded = expandedNoteIds.includes(note.id);
-                        const isLongNote = note.content.length > 50;
+                        const isExpanded =
+                          expandedNoteIds.includes(note.id);
+
+                        const isLongNote =
+                          note.content.length > 50;
 
                         const previewText = isExpanded
                           ? note.content
                           : note.content.slice(0, 50);
 
                         return (
-                          <button
+                          <div
                             key={note.id}
-                            type="button"
-                            onClick={() => toggleNote(note.id)}
-                            className="w-full text-left rounded-lg border border-border bg-muted/30 hover:bg-muted/50 transition-colors"
+                            className="w-full rounded-lg border border-border bg-muted/30 hover:bg-muted/50 transition-colors"
                           >
-                            <div className="flex items-start justify-between gap-4 p-4">
-                              <div className="min-w-0 flex-1">
+                            <div className="flex items-start gap-3 p-4">
+                              {/* 노트 내용 클릭 영역 */}
+                              <button
+                                type="button"
+                                onClick={() => toggleNote(note.id)}
+                                className="min-w-0 flex-1 text-left"
+                              >
                                 <p className="text-sm whitespace-pre-wrap break-words">
                                   {previewText}
                                   {!isExpanded && isLongNote && "..."}
@@ -1112,19 +1229,62 @@ export function PatientDetailPage() {
                                     .substring(0, 16)
                                     .replace("T", " ")}
                                 </p>
-                              </div>
+                              </button>
 
-                              {isLongNote && (
-                                <div className="flex-shrink-0 text-muted-foreground mt-0.5">
-                                  {isExpanded ? (
-                                    <ChevronUp className="size-4" />
-                                  ) : (
-                                    <ChevronDown className="size-4" />
-                                  )}
-                                </div>
-                              )}
+                              {/* 수정·삭제 및 펼침 아이콘 */}
+                              <div className="flex items-center gap-1 flex-shrink-0">
+                                <Button
+                                  type="button"
+                                  variant="ghost"
+                                  size="icon"
+                                  className="size-8"
+                                  onClick={() =>
+                                    handleOpenNoteEdit(note)
+                                  }
+                                  title="노트 수정"
+                                >
+                                  <Edit className="size-4" />
+                                </Button>
+
+                                <Button
+                                  type="button"
+                                  variant="ghost"
+                                  size="icon"
+                                  className="size-8 text-destructive hover:text-destructive"
+                                  onClick={() =>
+                                    handleDeleteNote(note.id)
+                                  }
+                                  disabled={
+                                    deletingNoteId === note.id
+                                  }
+                                  title="노트 삭제"
+                                >
+                                  <XCircle className="size-4" />
+                                </Button>
+
+                                {isLongNote && (
+                                  <button
+                                    type="button"
+                                    onClick={() =>
+                                      toggleNote(note.id)
+                                    }
+                                    className="size-8 flex items-center justify-center text-muted-foreground"
+                                    title={
+                                      isExpanded
+                                        ? "노트 접기"
+                                        : "노트 펼치기"
+                                    }
+                                  >
+                                    {isExpanded ? (
+                                      <ChevronUp className="size-4" />
+                                    ) : (
+                                      <ChevronDown className="size-4" />
+                                    )}
+                                  </button>
+                                )}
+                              </div>
                             </div>
-                          </button>
+                          </div>
                         );
                       })}
                     </div>
@@ -1134,8 +1294,149 @@ export function PatientDetailPage() {
             </Card>
           </TabsContent>
         </Tabs>
+        {/* Patient Basic Information Edit Dialog */}
+        <Dialog
+          open={editModalOpen}
+          onOpenChange={setEditModalOpen}
+        >
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>환자 기본정보 수정</DialogTitle>
+            </DialogHeader>
 
-        {/* Patient Edit Dialog */}
+            <div className="space-y-4 py-2">
+              <div className="space-y-2">
+                <Label htmlFor="editPatientName">
+                  환자명 *
+                </Label>
+
+                <Input
+                  id="editPatientName"
+                  value={editForm.name}
+                  onChange={(event) =>
+                    setEditForm((previous) => ({
+                      ...previous,
+                      name: event.target.value,
+                    }))
+                  }
+                  placeholder="환자명을 입력하세요."
+                />
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="editPatientPhone">
+                  휴대폰 번호 *
+                </Label>
+
+                <Input
+                  id="editPatientPhone"
+                  type="tel"
+                  value={editForm.phone}
+                  onChange={(event) =>
+                    setEditForm((previous) => ({
+                      ...previous,
+                      phone: event.target.value,
+                    }))
+                  }
+                  placeholder="010-0000-0000"
+                />
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="editPatientBirthdate">
+                  생년월일
+                </Label>
+
+                <Input
+                  id="editPatientBirthdate"
+                  type="date"
+                  value={editForm.birthdate}
+                  onChange={(event) =>
+                    setEditForm((previous) => ({
+                      ...previous,
+                      birthdate: event.target.value,
+                    }))
+                  }
+                />
+              </div>
+            </div>
+
+            <DialogFooter>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => setEditModalOpen(false)}
+              >
+                취소
+              </Button>
+
+              <Button
+                type="button"
+                onClick={handleSaveEdit}
+                disabled={savingEdit}
+                className="bg-gradient-to-r from-primary to-teal-500"
+              >
+                {savingEdit ? "저장 중..." : "수정 저장"}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+        {/* Note Edit Dialog */}
+        <Dialog
+          open={editingNoteId !== null}
+          onOpenChange={(open) => {
+            if (!open) {
+              setEditingNoteId(null);
+              setEditingNoteContent("");
+            }
+          }}
+        >
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>
+                내부 노트 수정
+              </DialogTitle>
+            </DialogHeader>
+
+            <div className="py-2">
+              <Textarea
+                value={editingNoteContent}
+                onChange={(event) =>
+                  setEditingNoteContent(
+                    event.target.value,
+                  )
+                }
+                placeholder="노트 내용을 입력하세요."
+                className="min-h-[200px]"
+              />
+            </div>
+
+            <DialogFooter>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => {
+                  setEditingNoteId(null);
+                  setEditingNoteContent("");
+                }}
+              >
+                취소
+              </Button>
+
+              <Button
+                type="button"
+                onClick={handleSaveNoteEdit}
+                disabled={savingEditedNote}
+                className="bg-gradient-to-r from-primary to-teal-500"
+              >
+                {savingEditedNote
+                  ? "저장 중..."
+                  : "수정 저장"}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+        {/* Procedure and Recovery Edit Dialog */}
         <Dialog
           open={procedureModalOpen}
           onOpenChange={setProcedureModalOpen}

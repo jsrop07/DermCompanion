@@ -14,6 +14,7 @@ import type {
   ProcedureOut,
   ProcedureCreate,
   ProcedureUpdate,
+  StaffNoteUpdate,
 } from "../types/patient";
 
 export const patientApi = {
@@ -54,7 +55,34 @@ export const patientApi = {
 
   // notes
   getNotes: (patientId: number) =>
-    apiClient.get<StaffNoteOut[]>(`/patients/${patientId}/notes`),
-  addNote: (patientId: number, data: StaffNoteCreate) =>
-    apiClient.post<StaffNoteOut>(`/patients/${patientId}/notes`, data),
+    apiClient.get<StaffNoteOut[]>(
+      `/patients/${patientId}/notes`,
+    ),
+
+  addNote: (
+    patientId: number,
+    data: StaffNoteCreate,
+  ) =>
+    apiClient.post<StaffNoteOut>(
+      `/patients/${patientId}/notes`,
+      data,
+    ),
+
+  updateNote: (
+    patientId: number,
+    noteId: number,
+    data: StaffNoteUpdate,
+  ) =>
+    apiClient.put<StaffNoteOut>(
+      `/patients/${patientId}/notes/${noteId}`,
+      data,
+    ),
+
+  deleteNote: (
+    patientId: number,
+    noteId: number,
+  ) =>
+    apiClient.delete<void>(
+      `/patients/${patientId}/notes/${noteId}`,
+    ),
 };

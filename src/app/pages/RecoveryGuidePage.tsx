@@ -19,16 +19,121 @@ import { recoveryGuideApi } from "../../api/recoveryGuideApi";
 import type { RecoveryGuideListItem, RecoveryGuideStepOut } from "../../types/recoveryGuide";
 
 const PRESET_STAGES = [
-  { id: "3h", label: "3시간", icon: "⏰" },
-  { id: "12h", label: "12시간", icon: "🌙" },
-  { id: "24h", label: "24시간 (1일)", icon: "☀️" },
-  { id: "48h", label: "48시간 (2일)", icon: "📅" },
-  { id: "72h", label: "72시간 (3일)", icon: "📆" },
-  { id: "7d", label: "7일 (1주)", icon: "📊" },
-  { id: "14d", label: "14일 (2주)", icon: "📈" },
+  {
+    id: "3h",
+    label: "3시간",
+    offsetMinutes: 180,
+    icon: "⏰",
+  },
+  {
+    id: "6h",
+    label: "6시간",
+    offsetMinutes: 360,
+    icon: "⏰",
+  },
+  {
+    id: "9h",
+    label: "9시간",
+    offsetMinutes: 540,
+    icon: "⏰",
+  },
+  {
+    id: "12h",
+    label: "12시간",
+    offsetMinutes: 720,
+    icon: "🌙",
+  },
+  {
+    id: "24h",
+    label: "24시간 (1일)",
+    offsetMinutes: 1440,
+    icon: "☀️",
+  },
+  {
+    id: "48h",
+    label: "48시간 (2일)",
+    offsetMinutes: 2880,
+    icon: "📅",
+  },
+  {
+    id: "72h",
+    label: "72시간 (3일)",
+    offsetMinutes: 4320,
+    icon: "📆",
+  },
+  {
+    id: "7d",
+    label: "7일",
+    offsetMinutes: 10080,
+    icon: "📊",
+  },
+  {
+    id: "14d",
+    label: "14일",
+    offsetMinutes: 20160,
+    icon: "📈",
+  },
 ];
 
 const NEW_STEP_ID = "__new__";
+
+type RecoveryTimeUnit = "minutes" | "hours" | "days";
+
+const convertToMinutes = (
+  value: number,
+  unit: RecoveryTimeUnit,
+) => {
+  if (unit === "days") {
+    return value * 24 * 60;
+  }
+
+  if (unit === "hours") {
+    return value * 60;
+  }
+
+  return value;
+};
+
+const convertFromMinutes = (
+  minutes: number,
+): {
+  value: string;
+  unit: RecoveryTimeUnit;
+} => {
+  if (minutes > 0 && minutes % 1440 === 0) {
+    return {
+      value: String(minutes / 1440),
+      unit: "days",
+    };
+  }
+
+  if (minutes > 0 && minutes % 60 === 0) {
+    return {
+      value: String(minutes / 60),
+      unit: "hours",
+    };
+  }
+
+  return {
+    value: String(minutes),
+    unit: "minutes",
+  };
+};
+
+const createTimeStageLabel = (
+  value: number,
+  unit: RecoveryTimeUnit,
+) => {
+  if (unit === "days") {
+    return `${value}일`;
+  }
+
+  if (unit === "hours") {
+    return `${value}시간`;
+  }
+
+  return `${value}분`;
+};
 
 export function RecoveryGuidePage() {
   const [templates, setTemplates] = useState<RecoveryGuideListItem[]>([]);
@@ -41,12 +146,21 @@ export function RecoveryGuidePage() {
 
   const [editingStep, setEditingStep] = useState<{
     time_stage: string;
+    offset_value: string;
+    offset_unit: RecoveryTimeUnit;
     title: string;
     precautions: string;
     recommendations: string;
     warning_symptoms: string;
-  }>({ time_stage: "", title: "", precautions: "", recommendations: "", warning_symptoms: "" });
-
+  }>({
+    time_stage: "",
+    offset_value: "",
+    offset_unit: "hours",
+    title: "",
+    precautions: "",
+    recommendations: "",
+    warning_symptoms: "",
+  });
   useEffect(() => {
     loadTemplates();
   }, []);
@@ -61,21 +175,52 @@ export function RecoveryGuidePage() {
 
   useEffect(() => {
     if (selectedStageId === NEW_STEP_ID) {
-      setEditingStep({ time_stage: "", title: "", precautions: "", recommendations: "", warning_symptoms: "" });
+      setEditingStep({
+        time_stage: "",
+        offset_value: "",
+        offset_unit: "hours",
+        title: "",
+        precautions: "",
+        recommendations: "",
+        warning_symptoms: "",
+      });
       return;
     }
     const step = steps.find((s) => s.time_stage === selectedStageId);
     if (step) {
+      const converted = convertFromMinutes(
+        step.offset_minutes,
+      );
+
       setEditingStep({
         time_stage: step.time_stage,
+        offset_value: converted.value,
+        offset_unit: converted.unit,
         title: step.title ?? "",
         precautions: step.precautions ?? "",
         recommendations: step.recommendations ?? "",
         warning_symptoms: step.warning_symptoms ?? "",
       });
     } else {
-      const preset = PRESET_STAGES.find(t => t.id === selectedStageId);
-      setEditingStep({ time_stage: preset ? preset.label : selectedStageId, title: "", precautions: "", recommendations: "", warning_symptoms: "" });
+      const preset = PRESET_STAGES.find(
+        (item) => item.id === selectedStageId,
+      );
+
+      if (preset) {
+        const converted = convertFromMinutes(
+          preset.offsetMinutes,
+        );
+
+        setEditingStep({
+          time_stage: preset.label,
+          offset_value: converted.value,
+          offset_unit: converted.unit,
+          title: "",
+          precautions: "",
+          recommendations: "",
+          warning_symptoms: "",
+        });
+      }
     }
   }, [selectedStageId, steps]);
 
@@ -107,38 +252,134 @@ export function RecoveryGuidePage() {
   };
 
   const handleSave = async () => {
-    if (!selectedTemplate) return;
-    if (!editingStep.time_stage.trim()) {
-      toast.error("시간대 / 단계명을 입력해주세요.");
+    if (!selectedTemplate) {
       return;
     }
+
+    const offsetValue = Number(
+      editingStep.offset_value,
+    );
+
+    if (
+      Number.isNaN(offsetValue)
+      || offsetValue < 0
+    ) {
+      toast.error(
+        "경과시간은 0 이상의 숫자로 입력해주세요.",
+      );
+      return;
+    }
+
+    const offsetMinutes = convertToMinutes(
+      offsetValue,
+      editingStep.offset_unit,
+    );
+
+    const stageLabel =
+      editingStep.time_stage.trim()
+      || createTimeStageLabel(
+        offsetValue,
+        editingStep.offset_unit,
+      );
+
+    const existingStep = steps.find(
+      (step) =>
+        step.time_stage === selectedStageId
+        && selectedStageId !== NEW_STEP_ID,
+    );
+
+    const duplicated = steps.some(
+      (step) =>
+        step.offset_minutes === offsetMinutes
+        && step.id !== existingStep?.id,
+    );
+
+    if (duplicated) {
+      toast.error(
+        "같은 경과시간의 단계가 이미 존재합니다.",
+      );
+      return;
+    }
+
+    const payload = {
+      time_stage: stageLabel,
+      offset_minutes: offsetMinutes,
+      title: editingStep.title,
+      precautions: editingStep.precautions,
+      recommendations:
+        editingStep.recommendations,
+      warning_symptoms:
+        editingStep.warning_symptoms,
+      sort_order: offsetMinutes,
+    };
+
     try {
       setSaving(true);
-      const existingStep = steps.find((s) => s.time_stage === selectedStageId && selectedStageId !== NEW_STEP_ID);
-      const sortOrder = steps.length + 1;
 
       if (existingStep) {
-        const updated = await recoveryGuideApi.updateStep(selectedTemplate, existingStep.id, {
-          ...editingStep,
-          sort_order: sortOrder,
-        });
-        setSteps(steps.map((s) => (s.id === updated.id ? updated : s)));
+        const updated =
+          await recoveryGuideApi.updateStep(
+            selectedTemplate,
+            existingStep.id,
+            payload,
+          );
+
+        setSteps((previousSteps) =>
+          previousSteps
+            .map((step) =>
+              step.id === updated.id
+                ? updated
+                : step
+            )
+            .sort(
+              (a, b) =>
+                a.offset_minutes
+                - b.offset_minutes,
+            )
+        );
+
         setSelectedStageId(updated.time_stage);
-        toast.success("회복 가이드가 저장되었습니다.");
+        toast.success(
+          "회복 가이드가 저장되었습니다.",
+        );
       } else {
-        const created = await recoveryGuideApi.addStep(selectedTemplate, {
-          ...editingStep,
-          sort_order: sortOrder,
-        });
-        setSteps([...steps, created]);
+        const created =
+          await recoveryGuideApi.addStep(
+            selectedTemplate,
+            payload,
+          );
+
+        setSteps((previousSteps) =>
+          [...previousSteps, created].sort(
+            (a, b) =>
+              a.offset_minutes
+              - b.offset_minutes,
+          )
+        );
+
         setSelectedStageId(created.time_stage);
-        setTemplates(templates.map((t) =>
-          t.id === selectedTemplate ? { ...t, stages: t.stages + 1 } : t
-        ));
-        toast.success("새 단계가 추가되었습니다.");
+
+        setTemplates((previousTemplates) =>
+          previousTemplates.map((template) =>
+            template.id === selectedTemplate
+              ? {
+                ...template,
+                stages: template.stages + 1,
+              }
+              : template
+          )
+        );
+
+        toast.success(
+          "새 단계가 추가되었습니다.",
+        );
       }
-    } catch {
-      toast.error("저장에 실패했습니다.");
+    } catch (error) {
+      toast.error(
+        error instanceof Error
+          ? error.message
+          : "저장에 실패했습니다.",
+      );
     } finally {
       setSaving(false);
     }
@@ -252,11 +493,10 @@ export function RecoveryGuidePage() {
                     <button
                       key={template.id}
                       onClick={() => setSelectedTemplate(template.id)}
-                      className={`w-full text-left p-4 rounded-lg border transition-all ${
-                        selectedTemplate === template.id
-                          ? "bg-primary/10 border-primary shadow-sm"
-                          : "border-border hover:bg-muted/50"
-                      }`}
+                      className={`w-full text-left p-4 rounded-lg border transition-all ${selectedTemplate === template.id
+                        ? "bg-primary/10 border-primary shadow-sm"
+                        : "border-border hover:bg-muted/50"
+                        }`}
                     >
                       <p className="font-semibold text-sm mb-1">{template.name}</p>
                       <div className="flex items-center justify-between text-xs text-muted-foreground">
@@ -337,11 +577,10 @@ export function RecoveryGuidePage() {
                           <button
                             key={step.time_stage}
                             onClick={() => setSelectedStageId(step.time_stage)}
-                            className={`flex items-center gap-1.5 px-3 py-2 rounded-lg border text-sm font-medium transition-all relative ${
-                              selectedStageId === step.time_stage
-                                ? "bg-primary text-primary-foreground border-primary shadow-sm"
-                                : "border-border hover:bg-muted/50 bg-muted/20"
-                            }`}
+                            className={`flex items-center gap-1.5 px-3 py-2 rounded-lg border text-sm font-medium transition-all relative ${selectedStageId === step.time_stage
+                              ? "bg-primary text-primary-foreground border-primary shadow-sm"
+                              : "border-border hover:bg-muted/50 bg-muted/20"
+                              }`}
                           >
                             <span>{icon}</span>
                             <span>{step.time_stage}</span>
@@ -352,11 +591,10 @@ export function RecoveryGuidePage() {
                       {/* Add new step button */}
                       <button
                         onClick={handleAddNewStep}
-                        className={`flex items-center gap-1.5 px-3 py-2 rounded-lg border text-sm font-medium transition-all border-dashed ${
-                          isNewStep
-                            ? "bg-primary/10 border-primary text-primary"
-                            : "border-border hover:bg-muted/50 text-muted-foreground"
-                        }`}
+                        className={`flex items-center gap-1.5 px-3 py-2 rounded-lg border text-sm font-medium transition-all border-dashed ${isNewStep
+                          ? "bg-primary/10 border-primary text-primary"
+                          : "border-border hover:bg-muted/50 text-muted-foreground"
+                          }`}
                       >
                         <Plus className="size-4" />
                         단계 추가
@@ -387,26 +625,125 @@ export function RecoveryGuidePage() {
                         {/* Time stage input - always editable */}
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                           <div className="space-y-2">
-                            <Label className="font-semibold">시간대 / 단계명 <span className="text-destructive">*</span></Label>
+                            <Label className="font-semibold">
+                              시술 후 경과시간
+                              <span className="text-destructive">
+                                {" "}*
+                              </span>
+                            </Label>
+
+                            <div className="grid grid-cols-[1fr_140px] gap-2">
+                              <Input
+                                type="number"
+                                min="0"
+                                step="1"
+                                value={editingStep.offset_value}
+                                onChange={(event) => {
+                                  const value = event.target.value;
+
+                                  setEditingStep((previous) => ({
+                                    ...previous,
+                                    offset_value: value,
+                                    time_stage:
+                                      value === ""
+                                        ? previous.time_stage
+                                        : createTimeStageLabel(
+                                          Number(value),
+                                          previous.offset_unit,
+                                        ),
+                                  }));
+                                }}
+                                placeholder="예: 3"
+                                className="bg-background border-border"
+                              />
+
+                              <Select
+                                value={editingStep.offset_unit}
+                                onValueChange={(
+                                  value: RecoveryTimeUnit,
+                                ) => {
+                                  setEditingStep((previous) => ({
+                                    ...previous,
+                                    offset_unit: value,
+                                    time_stage:
+                                      previous.offset_value
+                                        ? createTimeStageLabel(
+                                          Number(previous.offset_value),
+                                          value,
+                                        )
+                                        : previous.time_stage,
+                                  }));
+                                }}
+                              >
+                                <SelectTrigger>
+                                  <SelectValue />
+                                </SelectTrigger>
+
+                                <SelectContent>
+                                  <SelectItem value="minutes">
+                                    분
+                                  </SelectItem>
+
+                                  <SelectItem value="hours">
+                                    시간
+                                  </SelectItem>
+
+                                  <SelectItem value="days">
+                                    일
+                                  </SelectItem>
+                                </SelectContent>
+                              </Select>
+                            </div>
+
+                            <p className="text-xs text-muted-foreground">
+                              시술 시점으로부터 지난 시간을 입력합니다.
+                            </p>
+
+                            <div className="flex flex-wrap gap-1">
+                              {PRESET_STAGES.map((preset) => {
+                                const converted = convertFromMinutes(
+                                  preset.offsetMinutes,
+                                );
+
+                                return (
+                                  <button
+                                    key={preset.id}
+                                    type="button"
+                                    onClick={() =>
+                                      setEditingStep((previous) => ({
+                                        ...previous,
+                                        time_stage: preset.label,
+                                        offset_value: converted.value,
+                                        offset_unit: converted.unit,
+                                      }))
+                                    }
+                                    className="text-xs px-2 py-1 rounded border border-border bg-muted/50 hover:bg-muted text-muted-foreground"
+                                  >
+                                    {preset.label}
+                                  </button>
+                                );
+                              })}
+                            </div>
+                          </div>
+                          <div className="space-y-2">
+                            <Label>화면에 표시할 단계명</Label>
+
                             <Input
                               value={editingStep.time_stage}
-                              onChange={(e) => setEditingStep({ ...editingStep, time_stage: e.target.value })}
-                              placeholder="예: 3시간, 12시간, 1일차..."
+                              onChange={(event) =>
+                                setEditingStep((previous) => ({
+                                  ...previous,
+                                  time_stage: event.target.value,
+                                }))
+                              }
+                              placeholder="예: 3시간, 1일차"
                               className="bg-background border-border"
                             />
-                            {/* Preset shortcuts */}
-                            <div className="flex flex-wrap gap-1 mt-1">
-                              {PRESET_STAGES.map(p => (
-                                <button
-                                  key={p.id}
-                                  type="button"
-                                  onClick={() => setEditingStep({ ...editingStep, time_stage: p.label })}
-                                  className="text-xs px-2 py-0.5 rounded border border-border bg-muted/50 hover:bg-muted hover:text-foreground text-muted-foreground transition-colors"
-                                >
-                                  {p.label}
-                                </button>
-                              ))}
-                            </div>
+
+                            <p className="text-xs text-muted-foreground">
+                              계산에는 경과시간을 사용하고,
+                              이 값은 화면 표시에만 사용합니다.
+                            </p>
                           </div>
                           <div className="space-y-2">
                             <Label>단계 제목 (선택)</Label>

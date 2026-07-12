@@ -115,3 +115,7 @@ export interface StaffNoteOut {
 export interface StaffNoteCreate {
   content: string;
 }
+
+export interface StaffNoteUpdate {
+  content: string;
+}

@@ -183,6 +183,7 @@ class MedicationLogCalendarItem(BaseModel):
 
 class RecoveryGuideStepBase(BaseModel):
     time_stage: str
+    offset_minutes: int
     title: Optional[str] = None
     precautions: Optional[str] = None
     recommendations: Optional[str] = None
@@ -272,6 +273,9 @@ class StaffNoteBase(BaseModel):
 
 class StaffNoteCreate(StaffNoteBase):
     pass
+
+class StaffNoteUpdate(BaseModel):
+    content: str
 
 class StaffNoteOut(StaffNoteBase):
     id: int

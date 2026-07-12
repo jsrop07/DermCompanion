@@ -136,7 +136,12 @@ class RecoveryGuide(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
-    steps = relationship("RecoveryGuideStep", back_populates="guide", cascade="all, delete-orphan", order_by="RecoveryGuideStep.sort_order")
+    steps = relationship(
+        "RecoveryGuideStep",
+        back_populates="guide",
+        cascade="all, delete-orphan",
+        order_by="RecoveryGuideStep.offset_minutes",
+    )
 
 
 class RecoveryGuideStep(Base):
@@ -144,7 +149,8 @@ class RecoveryGuideStep(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     guide_id = Column(Integer, ForeignKey("recovery_guides.id"), nullable=False)
-    time_stage = Column(String(10), nullable=False)  # 3h, 12h, 24h, etc.
+    time_stage = Column(String(50), nullable=False)
+    offset_minutes = Column(Integer, nullable=False, default=0)
     title = Column(String(200), nullable=True)
     precautions = Column(Text, nullable=True)
     recommendations = Column(Text, nullable=True)

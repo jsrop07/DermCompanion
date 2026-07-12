@@ -1,10 +1,11 @@
 import { useState, useEffect } from "react";
 import { motion } from "motion/react";
-import { Search, Eye, Edit, Send, MoreVertical } from "lucide-react";
+import { Search, Eye, Edit, Send, MoreVertical, Trash2, } from "lucide-react";
 import { Card, CardContent } from "../components/ui/card";
 import { Input } from "../components/ui/input";
 import { Button } from "../components/ui/button";
 import { Badge } from "../components/ui/badge";
+import { toast } from "sonner";
 import {
   Table,
   TableBody,
@@ -14,19 +15,13 @@ import {
   TableRow,
 } from "../components/ui/table";
 import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "../components/ui/dropdown-menu";
-import {
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
   SelectValue,
 } from "../components/ui/select";
-import { Link, useNavigate, useSearchParams } from "react-router";
+import { useNavigate, useSearchParams } from "react-router";
 import { patientApi } from "../../api/patientApi";
 import type { PatientListItem } from "../../types/patient";
 
@@ -42,24 +37,24 @@ const STATUS_FILTERS = [
 export function PatientListPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const navigate = useNavigate();
-  
+  const [deletingPatientId, setDeletingPatientId] = useState<number | null>(null);
   const [patients, setPatients] = useState<PatientListItem[]>([]);
   const [searchTerm, setSearchTerm] = useState("");
   const [statusFilter, setStatusFilter] = useState(searchParams.get("filter") || "all-status");
   const [procedureFilter, setProcedureFilter] = useState("all-procedure");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-
+  const [openMenuPatientId, setOpenMenuPatientId] = useState<number | null>(null);
   const loadPatients = async (search?: string, status?: string, procedure?: string) => {
     try {
       setLoading(true);
       const apiStatus = (!status || status === "all-status") ? undefined : status;
       let data = await patientApi.list(search || undefined, apiStatus);
-      
+
       if (procedure && procedure !== "all-procedure") {
         data = data.filter(p => p.procedure === procedure);
       }
-      
+
       setPatients(data);
     } catch (e) {
       setError(e instanceof Error ? e.message : "환자 목록을 불러오지 못했습니다.");
@@ -67,7 +62,23 @@ export function PatientListPage() {
       setLoading(false);
     }
   };
+  useEffect(() => {
+    const handleDocumentClick = () => {
+      setOpenMenuPatientId(null);
+    };
 
+    document.addEventListener(
+      "click",
+      handleDocumentClick,
+    );
+
+    return () => {
+      document.removeEventListener(
+        "click",
+        handleDocumentClick,
+      );
+    };
+  }, []);
   useEffect(() => {
     loadPatients(searchTerm || undefined, statusFilter, procedureFilter);
   }, [statusFilter, procedureFilter]);
@@ -81,7 +92,40 @@ export function PatientListPage() {
     setStatusFilter(value);
     setSearchParams(value === "all-status" ? {} : { filter: value });
   };
+  const handleDeletePatient = async (
+    patientId: number,
+    patientName: string,
+  ) => {
+    const confirmed = window.confirm(
+      `${patientName} 환자를 삭제하시겠습니까?\n\n시술, 복약 기록, 내부 노트 등 연결된 정보도 함께 삭제됩니다.`,
+    );
 
+    if (!confirmed) {
+      return;
+    }
+
+    try {
+      setDeletingPatientId(patientId);
+
+      await patientApi.delete(patientId);
+
+      setPatients((previousPatients) =>
+        previousPatients.filter(
+          (patient) => patient.id !== patientId,
+        ),
+      );
+
+      toast.success("환자가 삭제되었습니다.");
+    } catch (error) {
+      toast.error(
+        error instanceof Error
+          ? error.message
+          : "환자 삭제에 실패했습니다.",
+      );
+    } finally {
+      setDeletingPatientId(null);
+    }
+  };
   const uniqueProcedures = Array.from(new Set(patients.map(p => p.procedure).filter(Boolean)));
   const activeLabel = STATUS_FILTERS.find(f => f.value === statusFilter)?.label ?? "전체 상태";
 
@@ -124,11 +168,10 @@ export function PatientListPage() {
                     <button
                       key={f.value}
                       onClick={() => handleStatusFilter(f.value)}
-                      className={`px-3 py-1.5 rounded-md text-sm font-medium transition-all border ${
-                        statusFilter === f.value
-                          ? "bg-primary text-primary-foreground border-primary shadow-sm"
-                          : "bg-muted/40 text-muted-foreground border-border hover:bg-muted hover:text-foreground"
-                      }`}
+                      className={`px-3 py-1.5 rounded-md text-sm font-medium transition-all border ${statusFilter === f.value
+                        ? "bg-primary text-primary-foreground border-primary shadow-sm"
+                        : "bg-muted/40 text-muted-foreground border-border hover:bg-muted hover:text-foreground"
+                        }`}
                     >
                       {f.label}
                     </button>
@@ -152,7 +195,7 @@ export function PatientListPage() {
               </div>
             ) : (
               <>
-                <div className="rounded-lg border border-border overflow-hidden">
+                <div className="rounded-lg border border-border">
                   <Table>
                     <TableHeader>
                       <TableRow className="bg-muted/50">
@@ -180,7 +223,9 @@ export function PatientListPage() {
                           animate={{ opacity: 1, y: 0 }}
                           transition={{ delay: index * 0.05, duration: 0.3 }}
                           className="hover:bg-muted/40 transition-colors cursor-pointer group"
-                          onClick={() => navigate(`/patients/${patient.id}`)}
+                          onClick={() =>
+                            navigate(`/patients/${patient.id}`)
+                          }
                         >
                           <TableCell className="font-semibold text-foreground group-hover:text-primary transition-colors">
                             {patient.name}
@@ -208,30 +253,108 @@ export function PatientListPage() {
                           <TableCell className="text-sm text-muted-foreground">
                             {patient.lastUpdate ?? "-"}
                           </TableCell>
-                          <TableCell className="text-right" onClick={(e) => e.stopPropagation()}>
-                            <DropdownMenu>
-                              <DropdownMenuTrigger asChild>
-                                <Button variant="ghost" size="icon" className="size-8">
-                                  <MoreVertical className="size-4" />
-                                </Button>
-                              </DropdownMenuTrigger>
-                              <DropdownMenuContent align="end">
-                                <DropdownMenuItem asChild>
-                                  <Link to={`/patients/${patient.id}`}>
+                          <TableCell className="text-right">
+                            <div
+                              className="relative inline-block"
+                              onClick={(event) => {
+                                event.stopPropagation();
+                              }}
+                            >
+                              <Button
+                                type="button"
+                                variant="ghost"
+                                size="icon"
+                                className="size-8"
+                                aria-label={`${patient.name} 작업 메뉴`}
+                                onClick={(event) => {
+                                  event.stopPropagation();
+
+                                  setOpenMenuPatientId(
+                                    openMenuPatientId === patient.id
+                                      ? null
+                                      : patient.id,
+                                  );
+                                }}
+                              >
+                                <MoreVertical className="size-4" />
+                              </Button>
+
+                              {openMenuPatientId === patient.id && (
+                                <div
+                                  className="
+          absolute right-0 top-full z-50 mt-1
+          w-40 rounded-md border border-border
+          bg-popover p-1 text-popover-foreground
+          shadow-lg
+        "
+                                  onClick={(event) => {
+                                    event.stopPropagation();
+                                  }}
+                                >
+                                  <button
+                                    type="button"
+                                    className="
+            flex w-full items-center rounded-sm
+            px-2 py-2 text-sm
+            hover:bg-accent hover:text-accent-foreground
+          "
+                                    onClick={() => {
+                                      setOpenMenuPatientId(null);
+                                      navigate(`/patients/${patient.id}`);
+                                    }}
+                                  >
                                     <Eye className="size-4 mr-2" />
                                     상세 보기
-                                  </Link>
-                                </DropdownMenuItem>
-                                <DropdownMenuItem>
-                                  <Edit className="size-4 mr-2" />
-                                  정보 수정
-                                </DropdownMenuItem>
-                                <DropdownMenuItem>
-                                  <Send className="size-4 mr-2" />
-                                  링크 재발송
-                                </DropdownMenuItem>
-                              </DropdownMenuContent>
-                            </DropdownMenu>
+                                  </button>
+                                  <button
+                                    type="button"
+                                    className="
+            flex w-full items-center rounded-sm
+            px-2 py-2 text-sm
+            hover:bg-accent hover:text-accent-foreground
+          "
+                                    onClick={() => {
+                                      setOpenMenuPatientId(null);
+
+                                      toast.info(
+                                        "링크 재발송 기능은 아직 연결되지 않았습니다.",
+                                      );
+                                    }}
+                                  >
+                                    <Send className="size-4 mr-2" />
+                                    링크 재발송
+                                  </button>
+
+                                  <button
+                                    type="button"
+                                    className="
+            flex w-full items-center rounded-sm
+            px-2 py-2 text-sm text-destructive
+            hover:bg-destructive/10
+            disabled:cursor-not-allowed
+            disabled:opacity-50
+          "
+                                    disabled={
+                                      deletingPatientId === patient.id
+                                    }
+                                    onClick={() => {
+                                      setOpenMenuPatientId(null);
+
+                                      void handleDeletePatient(
+                                        patient.id,
+                                        patient.name,
+                                      );
+                                    }}
+                                  >
+                                    <Trash2 className="size-4 mr-2" />
+
+                                    {deletingPatientId === patient.id
+                                      ? "삭제 중..."
+                                      : "환자 삭제"}
+                                  </button>
+                                </div>
+                              )}
+                            </div>
                           </TableCell>
                         </motion.tr>
                       ))}

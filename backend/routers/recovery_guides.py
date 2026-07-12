@@ -70,7 +70,14 @@ def get_guide_steps(guide_id: int, db: Session = Depends(get_db)):
     guide = db.query(RecoveryGuide).filter(RecoveryGuide.id == guide_id).first()
     if not guide:
         raise HTTPException(status_code=404, detail="회복 가이드를 찾을 수 없습니다.")
-    return guide.steps
+    return sorted(
+    guide.steps,
+        key=lambda step: (
+            step.offset_minutes,
+            step.sort_order,
+            step.id,
+        ),
+    )
 
 
 @router.post("/{guide_id}/steps", response_model=RecoveryGuideStepOut, status_code=201)
@@ -78,7 +85,27 @@ def add_guide_step(guide_id: int, data: RecoveryGuideStepCreate, db: Session = D
     guide = db.query(RecoveryGuide).filter(RecoveryGuide.id == guide_id).first()
     if not guide:
         raise HTTPException(status_code=404, detail="회복 가이드를 찾을 수 없습니다.")
-    step = RecoveryGuideStep(guide_id=guide_id, **data.model_dump())
+    duplicate_step = (
+        db.query(RecoveryGuideStep)
+        .filter(
+            RecoveryGuideStep.guide_id == guide_id,
+            RecoveryGuideStep.offset_minutes == data.offset_minutes,
+        )
+        .first()
+    )
+
+    if duplicate_step:
+        raise HTTPException(
+            status_code=400,
+            detail="같은 경과시간의 단계가 이미 존재합니다.",
+        )
+    payload = data.model_dump()
+    payload["sort_order"] = data.offset_minutes
+
+    step = RecoveryGuideStep(
+        guide_id=guide_id,
+        **payload,
+    )   
     db.add(step)
     db.commit()
     db.refresh(step)
@@ -89,13 +116,31 @@ def add_guide_step(guide_id: int, data: RecoveryGuideStepCreate, db: Session = D
 def update_guide_step(
     guide_id: int, step_id: int, data: RecoveryGuideStepCreate, db: Session = Depends(get_db)
 ):
+    duplicate_step = (
+        db.query(RecoveryGuideStep)
+        .filter(
+            RecoveryGuideStep.guide_id == guide_id,
+            RecoveryGuideStep.offset_minutes == data.offset_minutes,
+            RecoveryGuideStep.id != step_id,
+        )
+        .first()
+    )
+
+    if duplicate_step:
+        raise HTTPException(
+            status_code=400,
+            detail="같은 경과시간의 단계가 이미 존재합니다.",
+        )
     step = db.query(RecoveryGuideStep).filter(
         RecoveryGuideStep.id == step_id,
         RecoveryGuideStep.guide_id == guide_id
     ).first()
     if not step:
         raise HTTPException(status_code=404, detail="단계를 찾을 수 없습니다.")
-    for key, value in data.model_dump().items():
+    payload = data.model_dump()
+    payload["sort_order"] = data.offset_minutes
+
+    for key, value in payload.items():
         setattr(step, key, value)
     db.commit()
     db.refresh(step)
