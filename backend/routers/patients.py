@@ -1,5 +1,3 @@
-import os
-from zoneinfo import ZoneInfo
 from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
@@ -39,7 +37,10 @@ from schemas.schemas import (
     ProcedureUpdate,
     ProcedureOut,
 )
-
+from time_utils import (
+    clinic_now,
+    clinic_today,
+)
 router = APIRouter(prefix="/patients", tags=["patients"])
 
 
@@ -56,7 +57,7 @@ def _med_status(
     )
 
     since = (
-        _clinic_now()
+        clinic_now()
         - timedelta(hours=24)
     )
 
@@ -104,16 +105,6 @@ def _relative_time(dt: datetime) -> str:
     else:
         return f"{diff.days}일 전"
 
-def _clinic_now() -> datetime:
-    timezone_name = os.getenv(
-        "CLINIC_TIMEZONE",
-        "Asia/Seoul",
-    )
-
-    return (
-        datetime.now(ZoneInfo(timezone_name))
-        .replace(tzinfo=None)
-    )
 
 MEDICATION_MISSED_GRACE_MINUTES = 60
 
@@ -123,7 +114,7 @@ def _sync_missed_medication_logs(
     db: Session,
     lookback_days: int = 7,
 ) -> None:
-    now = _clinic_now()
+    now = clinic_now()
 
     range_start_date = (
         now.date()
@@ -298,7 +289,7 @@ def _calculate_recovery_state(
     elapsed_minutes = max(
         0.0,
         (
-            _clinic_now() - started_at
+            clinic_now() - started_at
         ).total_seconds() / 60,
     )
 
@@ -372,7 +363,7 @@ def list_patients(
         query = query.filter(Patient.name.contains(search))
     patients = query.order_by(Patient.created_at.desc()).all()
 
-    today = datetime.utcnow().date()
+    today = clinic_today()
 
     result = []
     for p in patients:
@@ -534,7 +525,7 @@ def get_patient_medication_schedules_today(
         .all()
     )
 
-    today = _clinic_now().date()
+    today = clinic_now().date()
     result = []
 
     for medication in medications:

@@ -23,6 +23,12 @@ from routers import (
     patient_app,
 )
 
+from time_utils import (
+    clinic_now,
+    clinic_today,
+)
+
+
 app = FastAPI(
     title="DermCompanion API",
     description="피부과 시술 후 환자 케어 및 회복 관리 시스템",
@@ -111,3 +117,14 @@ def health_check():
 @app.get("/")
 def root():
     return {"message": "DermCompanion API is running. Visit /docs for API documentation."}
+
+@app.get("/api/time-check")
+def time_check():
+    return {
+        "clinic_timezone": os.getenv(
+            "CLINIC_TIMEZONE",
+            "America/Chicago",
+        ),
+        "clinic_now": clinic_now(),
+        "clinic_today": clinic_today(),
+    }

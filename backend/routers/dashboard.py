@@ -3,7 +3,10 @@ from typing import List
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 from sqlalchemy import func
-
+from time_utils import (
+    clinic_now,
+    clinic_today,
+)
 from database import get_db
 from models.models import (
     Alert,
@@ -13,7 +16,6 @@ from models.models import (
 )
 from routers.patients import (
     _calculate_recovery_state,
-    _clinic_now,
     _med_status,
     _sync_missed_medication_logs,
 )
@@ -29,7 +31,7 @@ router = APIRouter(prefix="/dashboard", tags=["dashboard"])
 def get_dashboard_summary(
     db: Session = Depends(get_db),
 ):
-    today = _clinic_now().date()
+    today = clinic_today()
 
     patients = (
         db.query(Patient)

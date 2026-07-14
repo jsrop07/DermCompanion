@@ -1,6 +1,9 @@
 import re
 from typing import Optional
-
+from time_utils import (
+    clinic_now,
+    clinic_today,
+)
 from fastapi import (
     APIRouter,
     Depends,
@@ -27,7 +30,7 @@ from routers.auth import (
 from routers.patients import (
     MEDICATION_MISSED_GRACE_MINUTES,
     _calculate_recovery_state,
-    _clinic_now,
+    clinic_now,
     _sync_missed_medication_logs,
 )
 from schemas.schemas import (
@@ -216,7 +219,7 @@ def get_today_medication_schedules(
         .all()
     )
 
-    today = _clinic_now().date()
+    today = clinic_today()
     result = []
 
 
@@ -352,7 +355,7 @@ def complete_medication(
         )
 
     scheduled_at = request.scheduled_at
-    completed_at = _clinic_now()
+    completed_at = clinic_now()
 
     deadline = (
         scheduled_at
@@ -484,7 +487,7 @@ def get_patient_app_recovery(
             elapsed_minutes = max(
                 0.0,
                 (
-                    _clinic_now() - started_at
+                    clinic_now() - started_at
                 ).total_seconds() / 60,
             )
 

@@ -15,6 +15,7 @@ backend/routers/auth.py
 backend/routers/clinic.py
 backend/routers/dashboard.py
 backend/routers/medications.py
+backend/routers/patient_app.py
 backend/routers/patients.py
 backend/routers/procedures.py
 backend/routers/recovery_guides.py
@@ -23,6 +24,7 @@ backend/schemas/schemas.py
 backend/seed/__init__.py
 backend/seed/seed_data.py
 default_shadcn_theme.css
+dermcompanion_files.txt
 guidelines/Guidelines.md
 index.html
 package-lock.json
@@ -38,6 +40,7 @@ src/api/patientApi.ts
 src/api/procedureApi.ts
 src/api/recoveryGuideApi.ts
 src/app/App.tsx
+src/app/components/ProtectedRoute.tsx
 src/app/components/RootLayout.tsx
 src/app/components/figma/ImageWithFallback.tsx
 src/app/components/ui/accordion.tsx
