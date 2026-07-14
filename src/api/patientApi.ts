@@ -15,6 +15,7 @@ import type {
   ProcedureCreate,
   ProcedureUpdate,
   StaffNoteUpdate,
+  MedicationScheduleOut,
 } from "../types/patient";
 
 export const patientApi = {
@@ -52,7 +53,14 @@ export const patientApi = {
     apiClient.get<MedicationLogCalendarItem[]>(`/patients/${patientId}/medication-logs/calendar`),
   addMedicationLog: (patientId: number, data: MedicationLogCreate) =>
     apiClient.post<MedicationLogOut>(`/patients/${patientId}/medication-logs`, data),
-
+  getTodayMedicationSchedules: (
+    patientId: number,
+  ) =>
+    apiClient.get<
+      MedicationScheduleOut[]
+    >(
+      `/patients/${patientId}/medication-schedules/today`,
+    ),
   // notes
   getNotes: (patientId: number) =>
     apiClient.get<StaffNoteOut[]>(

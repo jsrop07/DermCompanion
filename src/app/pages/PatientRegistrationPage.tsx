@@ -18,12 +18,32 @@ import type { MedicationMasterOut } from "../../types/medication";
 import type { ProcedureMasterOut } from "../../types/procedure";
 
 // 약물 목록은 API에서 로드
-
+const getTodayDateString = () => {
+  return new Date().toLocaleDateString(
+    "sv-SE",
+  );
+};
 interface Medication {
   id: number;
   name: string;
   dosage: string;
+
+  /**
+   * 하루 복용 횟수
+   */
   frequency: string;
+
+  /**
+   * 며칠마다 복용하는지
+   */
+  intervalDays: number;
+
+  /**
+   * 복용 시작일
+   */
+  scheduleStartDate: string;
+
+  scheduleTimes: string[];
   purpose: string;
   isCustom: boolean;
 }
@@ -37,9 +57,38 @@ export function PatientRegistrationPage() {
 
   const [selectedRecoveryGuideId, setSelectedRecoveryGuideId] = useState("");
   const [submitting, setSubmitting] = useState(false);
-  const [medications, setMedications] = useState<Medication[]>([
-    { id: 1, name: "", dosage: "", frequency: "", purpose: "", isCustom: true },
-  ]);
+  const [medications, setMedications] =
+    useState<Medication[]>([
+      {
+        id: 1,
+        name: "",
+        dosage: "",
+        frequency: "",
+        intervalDays: 1,
+        scheduleStartDate:
+          getTodayDateString(),
+        scheduleTimes: [],
+        purpose: "",
+        isCustom: true,
+      },
+    ]);
+  const getDefaultScheduleTimes = (
+    frequency: string,
+  ): string[] => {
+    if (frequency === "daily-1") {
+      return ["09:00"];
+    }
+
+    if (frequency === "daily-2") {
+      return ["09:00", "21:00"];
+    }
+
+    if (frequency === "daily-3") {
+      return ["09:00", "14:00", "21:00"];
+    }
+
+    return [];
+  };
   useEffect(() => {
     const previousHtmlOverflow =
       document.documentElement.style.overflow;
@@ -82,9 +131,20 @@ export function PatientRegistrationPage() {
   }, []);
 
   const addMedication = () => {
-    setMedications([
-      ...medications,
-      { id: Date.now(), name: "", dosage: "", frequency: "", purpose: "", isCustom: true },
+    setMedications((previous) => [
+      ...previous,
+      {
+        id: Date.now(),
+        name: "",
+        dosage: "",
+        frequency: "",
+        intervalDays: 1,
+        scheduleStartDate:
+          getTodayDateString(),
+        scheduleTimes: [],
+        purpose: "",
+        isCustom: true,
+      },
     ]);
   };
 
@@ -97,15 +157,35 @@ export function PatientRegistrationPage() {
   const handleMedicationSelect = (index: number, selectedValue: string) => {
     const newMedications = [...medications];
     if (selectedValue === "custom") {
-      newMedications[index] = { ...newMedications[index], name: "", dosage: "", frequency: "", purpose: "", isCustom: true };
+      newMedications[index] = {
+        ...newMedications[index],
+        name: "",
+        dosage: "",
+        frequency: "",
+        intervalDays: 1,
+        scheduleStartDate:
+          getTodayDateString(),
+        scheduleTimes: [],
+        purpose: "",
+        isCustom: true,
+      };
     } else {
       const commonMed = commonMedications.find((med) => med.name === selectedValue);
       if (commonMed) {
+        const frequency =
+          commonMed.default_frequency ?? "";
+
         newMedications[index] = {
           ...newMedications[index],
           name: commonMed.name,
-          dosage: commonMed.default_dosage ?? "",
-          frequency: commonMed.default_frequency ?? "",
+          dosage:
+            commonMed.default_dosage ?? "",
+          frequency,
+          intervalDays: 1,
+          scheduleStartDate:
+            getTodayDateString(),
+          scheduleTimes:
+            getDefaultScheduleTimes(frequency),
           purpose: commonMed.purpose ?? "",
           isCustom: false,
         };
@@ -114,15 +194,50 @@ export function PatientRegistrationPage() {
     setMedications(newMedications);
   };
 
-  const updateMedication = (index: number, field: keyof Medication, value: string) => {
-    const newMedications = [...medications];
-    newMedications[index] = {
-      ...newMedications[index],
-      [field]: value,
-    };
-    setMedications(newMedications);
+  const updateMedication = <
+    K extends keyof Medication
+  >(
+    index: number,
+    field: K,
+    value: Medication[K],
+  ) => {
+    setMedications((previous) =>
+      previous.map(
+        (medication, medicationIndex) =>
+          medicationIndex === index
+            ? {
+              ...medication,
+              [field]: value,
+            }
+            : medication,
+      ),
+    );
   };
 
+  const updateMedicationTime = (
+    medicationIndex: number,
+    timeIndex: number,
+    value: string,
+  ) => {
+    setMedications((previous) =>
+      previous.map((medication, index) => {
+        if (index !== medicationIndex) {
+          return medication;
+        }
+
+        const updatedTimes = [
+          ...medication.scheduleTimes,
+        ];
+
+        updatedTimes[timeIndex] = value;
+
+        return {
+          ...medication,
+          scheduleTimes: updatedTimes,
+        };
+      }),
+    );
+  };
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     const form = e.target as HTMLFormElement;
@@ -140,8 +255,46 @@ export function PatientRegistrationPage() {
       toast.error("시술명과 시술 날짜는 필수입니다.");
       return;
     }
+    if (!procedureTimeEl?.value) {
+      toast.error("시술 시간을 입력해주세요.");
+      return;
+    }
     if (!selectedRecoveryGuideId) {
       toast.error("회복 가이드 템플릿을 선택해주세요.");
+      return;
+    }
+    const invalidMedication =
+      medications.find((medication) => {
+        if (!medication.name.trim()) {
+          return false;
+        }
+
+        if (!medication.frequency) {
+          return true;
+        }
+
+        if (
+          medication.frequency
+          !== "as-needed"
+          && medication.scheduleTimes
+            .filter(Boolean).length === 0
+        ) {
+          return true;
+        }
+
+        if (
+          !medication.scheduleStartDate
+        ) {
+          return true;
+        }
+
+        return false;
+      });
+
+    if (invalidMedication) {
+      toast.error(
+        "약물의 복용 횟수, 시작일, 복용 시간을 확인해주세요.",
+      );
       return;
     }
     try {
@@ -167,10 +320,6 @@ export function PatientRegistrationPage() {
             selectedRecoveryGuideId,
           ),
         });
-        if (!procedureTimeEl?.value) {
-          toast.error("시술 시간을 입력해주세요.");
-          return;
-        }
         if (procedureNote) {
           await patientApi.addNote(patient.id, {
             content: `[시술 노트]\n${procedureNote}`,
@@ -180,12 +329,29 @@ export function PatientRegistrationPage() {
       // 복약 추가
       for (const med of medications) {
         if (med.name) {
-          await patientApi.addMedication(patient.id, {
-            medication_name: med.name,
-            dosage: med.dosage || undefined,
-            frequency: med.frequency || undefined,
-            purpose: med.purpose || undefined,
-          });
+          await patientApi.addMedication(
+            patient.id,
+            {
+              medication_name: med.name,
+              dosage:
+                med.dosage || undefined,
+              frequency:
+                med.frequency || undefined,
+
+              interval_days:
+                med.intervalDays,
+
+              schedule_start_date:
+                med.scheduleStartDate
+                || undefined,
+
+              schedule_times:
+                med.scheduleTimes.filter(Boolean),
+
+              purpose:
+                med.purpose || undefined,
+            },
+          );
         }
       }
       toast.success("환자가 성공적으로 등록되었습니다!");
@@ -396,22 +562,147 @@ export function PatientRegistrationPage() {
                       />
                     </div>
                     <div className="space-y-2">
-                      <Label>복용 빈도</Label>
+                      <Label>하루 복용 횟수</Label>
+
                       <Select
                         value={med.frequency}
-                        onValueChange={(value) => updateMedication(index, "frequency", value)}
+                        onValueChange={(value) => {
+                          setMedications((previous) =>
+                            previous.map((item, itemIndex) =>
+                              itemIndex === index
+                                ? {
+                                  ...item,
+                                  frequency: value,
+                                  scheduleTimes:
+                                    getDefaultScheduleTimes(
+                                      value,
+                                    ),
+                                }
+                                : item,
+                            ),
+                          );
+                        }}
                       >
                         <SelectTrigger className="bg-background border-border">
                           <SelectValue placeholder="선택" />
                         </SelectTrigger>
+
                         <SelectContent>
-                          <SelectItem value="daily-1">1일 1회</SelectItem>
-                          <SelectItem value="daily-2">1일 2회</SelectItem>
-                          <SelectItem value="daily-3">1일 3회</SelectItem>
-                          <SelectItem value="as-needed">필요시</SelectItem>
+                          <SelectItem value="daily-1">
+                            하루 1회
+                          </SelectItem>
+
+                          <SelectItem value="daily-2">
+                            하루 2회
+                          </SelectItem>
+
+                          <SelectItem value="daily-3">
+                            하루 3회
+                          </SelectItem>
+
+                          <SelectItem value="as-needed">
+                            필요시
+                          </SelectItem>
                         </SelectContent>
                       </Select>
                     </div>
+                    <div className="space-y-2">
+                      <Label>복용 간격</Label>
+
+                      <div className="flex items-center gap-2">
+                        <Input
+                          type="number"
+                          min="1"
+                          max="365"
+                          value={med.intervalDays}
+                          onChange={(event) => {
+                            const value = Math.max(
+                              1,
+                              Number(event.target.value) || 1,
+                            );
+
+                            setMedications((previous) =>
+                              previous.map(
+                                (item, itemIndex) =>
+                                  itemIndex === index
+                                    ? {
+                                      ...item,
+                                      intervalDays: value,
+                                    }
+                                    : item,
+                              ),
+                            );
+                          }}
+                          className="bg-background border-border"
+                        />
+
+                        <span className="text-sm whitespace-nowrap">
+                          일마다
+                        </span>
+                      </div>
+
+                      <p className="text-xs text-muted-foreground">
+                        1은 매일, 2는 이틀마다,
+                        3은 3일마다 복용입니다.
+                      </p>
+                    </div>
+
+                    <div className="space-y-2">
+                      <Label>복용 시작일</Label>
+
+                      <Input
+                        type="date"
+                        value={med.scheduleStartDate}
+                        onChange={(event) =>
+                          setMedications((previous) =>
+                            previous.map(
+                              (item, itemIndex) =>
+                                itemIndex === index
+                                  ? {
+                                    ...item,
+                                    scheduleStartDate:
+                                      event.target.value,
+                                  }
+                                  : item,
+                            ),
+                          )
+                        }
+                        className="bg-background border-border"
+                      />
+                    </div>
+                    {med.scheduleTimes.length > 0 && (
+                      <div className="space-y-2 md:col-span-2">
+                        <Label>복용 시간</Label>
+
+                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                          {med.scheduleTimes.map(
+                            (timeValue, timeIndex) => (
+                              <div
+                                key={timeIndex}
+                                className="space-y-1"
+                              >
+                                <Input
+                                  type="time"
+                                  value={timeValue}
+                                  onChange={(event) =>
+                                    updateMedicationTime(
+                                      index,
+                                      timeIndex,
+                                      event.target.value,
+                                    )
+                                  }
+                                  className="bg-background border-border"
+                                />
+
+                                <p className="text-xs text-muted-foreground">
+                                  {timeIndex + 1}회차
+                                </p>
+                              </div>
+                            ),
+                          )}
+                        </div>
+                      </div>
+                    )}
                     <div className="space-y-2">
                       <Label>목적</Label>
                       <Input

@@ -11,7 +11,17 @@ from models import models  # noqa: F401 - 모델 등록을 위해 import
 # 개발 단계: 자동 테이블 생성
 Base.metadata.create_all(bind=engine)
 
-from routers import auth, dashboard, patients, medications, recovery_guides, clinic, alerts, procedures
+from routers import (
+    auth,
+    dashboard,
+    patients,
+    medications,
+    recovery_guides,
+    clinic,
+    alerts,
+    procedures,
+    patient_app,
+)
 
 app = FastAPI(
     title="DermCompanion API",
@@ -34,6 +44,14 @@ api_prefix = "/api"
 # 로그인 API는 인증 없이 접근 가능
 app.include_router(
     auth.router,
+    prefix=api_prefix,
+)
+
+# 모바일 환자 앱 API
+# 로그인은 공개되어 있고,
+# 나머지 API는 각 엔드포인트에서 환자 JWT를 검사합니다.
+app.include_router(
+    patient_app.router,
     prefix=api_prefix,
 )
 

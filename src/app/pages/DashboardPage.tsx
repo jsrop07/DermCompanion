@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { motion } from "motion/react";
-import { Users, Activity, AlertCircle, TrendingUp, ArrowRight, Calendar } from "lucide-react";
+import { Users, Activity, AlertCircle, TrendingUp, ArrowRight, Calendar, Clock } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card";
 import { Button } from "../components/ui/button";
 import { Badge } from "../components/ui/badge";
@@ -16,24 +16,37 @@ import { Link, useNavigate } from "react-router";
 import { dashboardApi } from "../../api/dashboardApi";
 import type { DashboardSummary, DashboardAlert, PatientListItem } from "../../types/dashboard";
 
-const statConfig = [
+type DashboardStatConfig = {
+  key: keyof DashboardSummary;
+  title: string;
+  icon: typeof Users;
+  color: string;
+};
+
+const statConfig: DashboardStatConfig[] = [
   {
-    key: "today_patients" as keyof DashboardSummary,
+    key: "today_patients",
     title: "오늘 등록 환자",
     icon: Users,
     color: "from-cyan-500 to-blue-500",
   },
   {
-    key: "active_recovery_patients" as keyof DashboardSummary,
+    key: "active_recovery_patients",
     title: "활성 회복 환자",
     icon: Activity,
     color: "from-teal-500 to-emerald-500",
   },
   {
-    key: "missed_medication_patients" as keyof DashboardSummary,
+    key: "delayed_medication_patients",
+    title: "지연 복용 환자",
+    icon: Clock,
+    color: "from-yellow-500 to-amber-500",
+  },
+  {
+    key: "missed_medication_patients",
     title: "복약 누락 환자",
     icon: AlertCircle,
-    color: "from-amber-500 to-orange-500",
+    color: "from-orange-500 to-red-500",
   },
 ];
 
@@ -45,10 +58,35 @@ export function DashboardPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  const handleStatClick = (key: string) => {
-    if (key === "today_patients") navigate("/patients?filter=today");
-    else if (key === "active_recovery_patients") navigate("/patients?filter=active");
-    else if (key === "missed_medication_patients") navigate("/patients?filter=missed");
+  const handleStatClick = (
+    key: string,
+  ) => {
+    if (key === "today_patients") {
+      navigate(
+        "/patients?filter=today",
+      );
+    } else if (
+      key
+      === "active_recovery_patients"
+    ) {
+      navigate(
+        "/patients?filter=recovering",
+      );
+    } else if (
+      key
+      === "delayed_medication_patients"
+    ) {
+      navigate(
+        "/patients?filter=delayed",
+      );
+    } else if (
+      key
+      === "missed_medication_patients"
+    ) {
+      navigate(
+        "/patients?filter=missed",
+      );
+    }
   };
 
   useEffect(() => {
@@ -96,7 +134,7 @@ export function DashboardPage() {
   return (
     <div className="p-8 space-y-8">
       {/* Stats Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-6">
         {statConfig.map((stat, index) => {
           const Icon = stat.icon;
           const value = summary ? summary[stat.key] : 0;
@@ -107,7 +145,7 @@ export function DashboardPage() {
               animate={{ opacity: 1, y: 0 }}
               transition={{ delay: index * 0.1, duration: 0.4 }}
             >
-              <Card 
+              <Card
                 className="border-border hover:shadow-lg transition-all duration-300 overflow-hidden group cursor-pointer"
                 onClick={() => handleStatClick(stat.key)}
               >
@@ -191,8 +229,14 @@ export function DashboardPage() {
                         </TableCell>
                         <TableCell>
                           <Badge
-                            variant={patient.medicationStatus === "정상" ? "default" : "destructive"}
-                            className={patient.medicationStatus === "정상" ? "bg-teal-500" : ""}
+                            className={
+                              patient.medicationStatus === "정상"
+                                ? "bg-teal-500 text-white"
+                                : patient.medicationStatus
+                                  === "지연"
+                                  ? "bg-amber-500 text-white"
+                                  : "bg-destructive text-white"
+                            }
                           >
                             {patient.medicationStatus}
                           </Badge>
@@ -257,9 +301,8 @@ export function DashboardPage() {
                     key={alert.id}
                     className="flex gap-3 p-3 rounded-lg bg-accent/30 border border-border/50 hover:bg-accent/50 transition-colors"
                   >
-                    <div className={`size-2 rounded-full mt-2 flex-shrink-0 ${
-                      alert.type === "medication" ? "bg-orange-500" : "bg-blue-500"
-                    }`} />
+                    <div className={`size-2 rounded-full mt-2 flex-shrink-0 ${alert.type === "medication" ? "bg-orange-500" : "bg-blue-500"
+                      }`} />
                     <div className="flex-1 min-w-0">
                       <p className="font-medium text-sm text-foreground">{alert.patient}</p>
                       <p className="text-sm text-muted-foreground">{alert.message}</p>

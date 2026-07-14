@@ -26,12 +26,34 @@ import { patientApi } from "../../api/patientApi";
 import type { PatientListItem } from "../../types/patient";
 
 const STATUS_FILTERS = [
-  { value: "all-status", label: "전체 상태" },
-  { value: "today", label: "오늘 등록" },
-  { value: "normal", label: "정상 복약" },
-  { value: "missed", label: "복약 누락" },
-  { value: "recovering", label: "회복중" },
-  { value: "completed", label: "회복완료" },
+  {
+    value: "all-status",
+    label: "전체 상태",
+  },
+  {
+    value: "today",
+    label: "오늘 등록",
+  },
+  {
+    value: "normal",
+    label: "정상 복약",
+  },
+  {
+    value: "delayed",
+    label: "지연 복용",
+  },
+  {
+    value: "missed",
+    label: "복약 누락",
+  },
+  {
+    value: "recovering",
+    label: "회복중",
+  },
+  {
+    value: "completed",
+    label: "회복 완료",
+  },
 ];
 
 export function PatientListPage() {
@@ -244,8 +266,14 @@ export function PatientListPage() {
                           </TableCell>
                           <TableCell>
                             <Badge
-                              variant={patient.medicationStatus === "정상" ? "default" : "destructive"}
-                              className={patient.medicationStatus === "정상" ? "bg-teal-500" : ""}
+                              className={
+                                patient.medicationStatus === "정상"
+                                  ? "bg-teal-500 text-white"
+                                  : patient.medicationStatus
+                                    === "지연"
+                                    ? "bg-amber-500 text-white"
+                                    : "bg-destructive text-white"
+                              }
                             >
                               {patient.medicationStatus}
                             </Badge>

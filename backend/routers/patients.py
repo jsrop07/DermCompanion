@@ -1,10 +1,14 @@
 import os
-from datetime import datetime, timedelta, time
 from zoneinfo import ZoneInfo
 from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
-
+from datetime import (
+    date,
+    datetime,
+    timedelta,
+    time,
+)
 from database import get_db
 from models.models import (
     Patient,
@@ -17,26 +21,78 @@ from models.models import (
     RecoveryGuide,
 )
 from schemas.schemas import (
-    PatientCreate, PatientUpdate, PatientOut, PatientDetailOut, PatientListItem,
-    PatientMedicationCreate, PatientMedicationOut,
-    MedicationLogCreate, MedicationLogOut, MedicationLogCalendarItem,
-    StaffNoteCreate, StaffNoteUpdate, StaffNoteOut,
-    ProcedureCreate, ProcedureUpdate, ProcedureOut,
+    PatientCreate,
+    PatientUpdate,
+    PatientOut,
+    PatientDetailOut,
+    PatientListItem,
+    PatientMedicationCreate,
+    PatientMedicationOut,
+    MedicationLogCreate,
+    MedicationLogOut,
+    MedicationLogCalendarItem,
+    MedicationScheduleOut,
+    StaffNoteCreate,
+    StaffNoteUpdate,
+    StaffNoteOut,
+    ProcedureCreate,
+    ProcedureUpdate,
+    ProcedureOut,
 )
 
 router = APIRouter(prefix="/patients", tags=["patients"])
 
 
-def _med_status(patient: Patient, db: Session) -> str:
+def _med_status(
+    patient: Patient,
+    db: Session,
+) -> str:
     if patient.medication_status_override:
         return patient.medication_status_override
-    since = datetime.utcnow() - timedelta(hours=24)
-    missed = db.query(MedicationLog).filter(
-        MedicationLog.patient_id == patient.id,
-        MedicationLog.status == MedicationStatus.missed,
-        MedicationLog.scheduled_at >= since,
-    ).first()
-    return "누락" if missed else "정상"
+
+    _sync_missed_medication_logs(
+        patient.id,
+        db,
+    )
+
+    since = (
+        _clinic_now()
+        - timedelta(hours=24)
+    )
+
+    missed = (
+        db.query(MedicationLog)
+        .filter(
+            MedicationLog.patient_id
+            == patient.id,
+            MedicationLog.status
+            == MedicationStatus.missed,
+            MedicationLog.scheduled_at
+            >= since,
+        )
+        .first()
+    )
+
+    if missed:
+        return "누락"
+
+    late_completed = (
+        db.query(MedicationLog)
+        .filter(
+            MedicationLog.patient_id
+            == patient.id,
+            MedicationLog.status
+            == MedicationStatus.late_completed,
+            MedicationLog.scheduled_at
+            >= since,
+        )
+        .first()
+    )
+
+    if late_completed:
+        return "지연"
+
+    return "정상"
 
 
 def _relative_time(dt: datetime) -> str:
@@ -59,6 +115,137 @@ def _clinic_now() -> datetime:
         .replace(tzinfo=None)
     )
 
+MEDICATION_MISSED_GRACE_MINUTES = 60
+
+
+def _sync_missed_medication_logs(
+    patient_id: int,
+    db: Session,
+    lookback_days: int = 7,
+) -> None:
+    now = _clinic_now()
+
+    range_start_date = (
+        now.date()
+        - timedelta(days=lookback_days)
+    )
+
+    medications = (
+        db.query(PatientMedication)
+        .filter(
+            PatientMedication.patient_id
+            == patient_id,
+            PatientMedication.is_active
+            == True,
+        )
+        .all()
+    )
+
+    changed = False
+
+    for medication in medications:
+        if not medication.schedule_times:
+            continue
+
+        start_date = (
+            medication.schedule_start_date
+            or medication.created_at.date()
+        )
+
+        interval_days = max(
+            medication.interval_days or 1,
+            1,
+        )
+
+        current_date = max(
+            start_date,
+            range_start_date,
+        )
+
+        while current_date <= now.date():
+            days_difference = (
+                current_date - start_date
+            ).days
+
+            is_medication_date = (
+                days_difference >= 0
+                and days_difference
+                % interval_days == 0
+            )
+
+            if is_medication_date:
+                for schedule_time in (
+                    medication.schedule_times
+                ):
+                    try:
+                        hour_text, minute_text = (
+                            schedule_time.split(":")
+                        )
+
+                        scheduled_at = datetime.combine(
+                            current_date,
+                            time(
+                                hour=int(hour_text),
+                                minute=int(minute_text),
+                            ),
+                        )
+                    except (
+                        ValueError,
+                        AttributeError,
+                    ):
+                        continue
+
+                    missed_deadline = (
+                        scheduled_at
+                        + timedelta(
+                            minutes=(
+                                MEDICATION_MISSED_GRACE_MINUTES
+                            )
+                        )
+                    )
+
+                    if missed_deadline > now:
+                        continue
+
+                    existing_log = (
+                        db.query(MedicationLog)
+                        .filter(
+                            MedicationLog.patient_id
+                            == patient_id,
+                            MedicationLog.patient_medication_id
+                            == medication.id,
+                            MedicationLog.scheduled_at
+                            == scheduled_at,
+                        )
+                        .first()
+                    )
+
+                    if existing_log:
+                        continue
+
+                    db.add(
+                        MedicationLog(
+                            patient_id=patient_id,
+                            patient_medication_id=(
+                                medication.id
+                            ),
+                            medication_name=(
+                                medication
+                                .medication_name
+                            ),
+                            scheduled_at=scheduled_at,
+                            status=(
+                                MedicationStatus.missed
+                            ),
+                        )
+                    )
+
+                    changed = True
+
+            current_date += timedelta(days=1)
+
+    if changed:
+        db.commit()
 
 def _calculate_recovery_state(
     procedure: Optional[Procedure],
@@ -200,9 +387,22 @@ def list_patients(
                 continue
 
         # Medication filters
-        if status_filter == "normal" and med_status != "정상":
+        if (
+            status_filter == "normal"
+            and med_status != "정상"
+        ):
             continue
-        if status_filter == "missed" and med_status != "누락":
+
+        if (
+            status_filter == "delayed"
+            and med_status != "지연"
+        ):
+            continue
+
+        if (
+            status_filter == "missed"
+            and med_status != "누락"
+        ):
             continue
 
         # Recovery filters
@@ -219,7 +419,11 @@ def list_patients(
             name=p.name,
             procedure=proc.procedure_name if proc else None,
             date=str(proc.procedure_date) if proc else None,
-            stage=recovery_stage,
+            stage=(
+                "회복 완료"
+                if recovery_progress >= 100
+                else recovery_stage
+            ),
             medicationStatus=med_status,
             lastUpdate=_relative_time(p.updated_at),
             createdAt=str(p.created_at.date()),
@@ -287,7 +491,150 @@ def get_patient_medications(patient_id: int, db: Session = Depends(get_db)):
         PatientMedication.is_active == True,
     ).all()
 
+@router.get(
+    "/{patient_id}/medication-schedules/today",
+    response_model=List[
+        MedicationScheduleOut
+    ],
+)
+def get_patient_medication_schedules_today(
+    patient_id: int,
+    db: Session = Depends(get_db),
+):
+    patient = (
+        db.query(Patient)
+        .filter(
+            Patient.id == patient_id
+        )
+        .first()
+    )
 
+    if not patient:
+        raise HTTPException(
+            status_code=404,
+            detail="환자를 찾을 수 없습니다.",
+        )
+
+    _sync_missed_medication_logs(
+        patient_id,
+        db,
+    )
+
+    medications = (
+        db.query(PatientMedication)
+        .filter(
+            PatientMedication.patient_id
+            == patient_id,
+            PatientMedication.is_active
+            == True,
+        )
+        .order_by(
+            PatientMedication.created_at.asc()
+        )
+        .all()
+    )
+
+    today = _clinic_now().date()
+    result = []
+
+    for medication in medications:
+        start_date = (
+            medication.schedule_start_date
+            or medication.created_at.date()
+        )
+
+        interval_days = max(
+            medication.interval_days or 1,
+            1,
+        )
+
+        day_difference = (
+            today - start_date
+        ).days
+
+        if (
+            day_difference < 0
+            or day_difference
+            % interval_days != 0
+        ):
+            continue
+
+        for schedule_time in (
+            medication.schedule_times or []
+        ):
+            try:
+                hour_text, minute_text = (
+                    schedule_time.split(":")
+                )
+
+                scheduled_at = datetime.combine(
+                    today,
+                    time(
+                        hour=int(hour_text),
+                        minute=int(minute_text),
+                    ),
+                )
+            except (
+                ValueError,
+                AttributeError,
+            ):
+                continue
+
+            log = (
+                db.query(MedicationLog)
+                .filter(
+                    MedicationLog.patient_id
+                    == patient_id,
+                    MedicationLog
+                    .patient_medication_id
+                    == medication.id,
+                    MedicationLog.scheduled_at
+                    == scheduled_at,
+                )
+                .first()
+            )
+
+            result.append(
+                MedicationScheduleOut(
+                    medication_id=medication.id,
+                    medication_name=(
+                        medication.medication_name
+                    ),
+                    dosage=medication.dosage,
+                    purpose=medication.purpose,
+                    scheduled_time=schedule_time,
+                    scheduled_at=scheduled_at,
+                    status=(
+                        log.status.value
+                        if log
+                        else None
+                    ),
+                    completed=(
+                        log is not None
+                        and log.status
+                        in (
+                            MedicationStatus.completed,
+                            MedicationStatus
+                            .late_completed,
+                        )
+                    ),
+                    completed_at=(
+                        log.completed_at
+                        if log
+                        else None
+                    ),
+                    completed_log_id=(
+                        log.id if log else None
+                    ),
+                )
+            )
+
+    return sorted(
+        result,
+        key=lambda item:
+            item.scheduled_at,
+    )
+    
 @router.post("/{patient_id}/medications", response_model=PatientMedicationOut, status_code=201)
 def add_patient_medication(
     patient_id: int, data: PatientMedicationCreate, db: Session = Depends(get_db)
@@ -334,12 +681,32 @@ def delete_patient_medication(
 
 
 # ─── Medication Logs ────────────────────────────────────
+@router.get(
+    "/{patient_id}/medication-logs",
+    response_model=List[MedicationLogOut],
+)
+def get_medication_logs(
+    patient_id: int,
+    limit: int = 20,
+    db: Session = Depends(get_db),
+):
+    _sync_missed_medication_logs(
+        patient_id,
+        db,
+    )
 
-@router.get("/{patient_id}/medication-logs", response_model=List[MedicationLogOut])
-def get_medication_logs(patient_id: int, limit: int = 20, db: Session = Depends(get_db)):
-    return db.query(MedicationLog).filter(
-        MedicationLog.patient_id == patient_id
-    ).order_by(MedicationLog.scheduled_at.desc()).limit(limit).all()
+    return (
+        db.query(MedicationLog)
+        .filter(
+            MedicationLog.patient_id
+            == patient_id
+        )
+        .order_by(
+            MedicationLog.scheduled_at.desc()
+        )
+        .limit(limit)
+        .all()
+    )
 
 
 @router.get("/{patient_id}/medication-logs/calendar", response_model=List[MedicationLogCalendarItem])

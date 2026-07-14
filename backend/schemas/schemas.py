@@ -1,6 +1,10 @@
 from datetime import date, datetime, time
 from typing import Optional, List
-from pydantic import BaseModel, EmailStr
+from pydantic import (
+    BaseModel,
+    EmailStr,
+    Field,
+)
 
 
 # ─── Auth ───────────────────────────────────────────────
@@ -141,6 +145,14 @@ class PatientMedicationBase(BaseModel):
     medication_name: str
     dosage: Optional[str] = None
     frequency: Optional[str] = None
+
+    interval_days: int = 1
+    schedule_start_date: Optional[date] = None
+
+    schedule_times: List[str] = Field(
+        default_factory=list,
+    )
+
     purpose: Optional[str] = None
 
 class PatientMedicationCreate(PatientMedicationBase):
@@ -161,14 +173,19 @@ class PatientMedicationOut(PatientMedicationBase):
 class MedicationLogBase(BaseModel):
     medication_name: str
     scheduled_at: datetime
-    status: str  # completed / missed
+    status: str
+    completed_at: Optional[datetime] = None
+
 
 class MedicationLogCreate(MedicationLogBase):
     patient_medication_id: Optional[int] = None
 
+
 class MedicationLogOut(MedicationLogBase):
     id: int
     patient_id: int
+    patient_medication_id: Optional[int] = None
+    created_at: datetime
 
     class Config:
         from_attributes = True
@@ -291,6 +308,7 @@ class StaffNoteOut(StaffNoteBase):
 class DashboardSummary(BaseModel):
     today_patients: int
     active_recovery_patients: int
+    delayed_medication_patients: int
     missed_medication_patients: int
 
 class DashboardAlert(BaseModel):
@@ -299,3 +317,89 @@ class DashboardAlert(BaseModel):
     patient: str
     message: str
     time: str
+
+# ─── Patient App Auth ───────────────────────────────────
+
+class PatientAppLoginRequest(BaseModel):
+    phone: str
+    birthdate: date
+
+
+class PatientAppPatientOut(BaseModel):
+    id: int
+    name: str
+    phone: str
+    birthdate: Optional[date] = None
+
+    class Config:
+        from_attributes = True
+
+
+class PatientAppLoginResponse(BaseModel):
+    access_token: str
+    token_type: str = "bearer"
+    patient: PatientAppPatientOut
+
+
+class PatientAppMedicationOut(BaseModel):
+    id: int
+    medication_name: str
+    dosage: Optional[str] = None
+    frequency: Optional[str] = None
+
+    interval_days: int = 1
+    schedule_start_date: Optional[date] = None
+
+    schedule_times: List[str] = Field(
+        default_factory=list,
+    )
+
+    purpose: Optional[str] = None
+    adherence: float
+    is_active: bool
+
+    class Config:
+        from_attributes = True
+
+
+class PatientAppRecoveryStepOut(BaseModel):
+    id: int
+    time_stage: str
+    offset_minutes: int
+    title: Optional[str] = None
+    precautions: Optional[str] = None
+    recommendations: Optional[str] = None
+    warning_symptoms: Optional[str] = None
+
+
+class PatientAppRecoveryOut(BaseModel):
+    procedure_name: Optional[str] = None
+    procedure_date: Optional[date] = None
+    procedure_time: Optional[time] = None
+    recovery_stage: Optional[str] = None
+    recovery_progress: float = 0.0
+    current_step: Optional[PatientAppRecoveryStepOut] = None
+    next_step: Optional[PatientAppRecoveryStepOut] = None
+
+class MedicationScheduleOut(BaseModel):
+    medication_id: int
+    medication_name: str
+    dosage: Optional[str] = None
+    purpose: Optional[str] = None
+
+    scheduled_time: str
+    scheduled_at: datetime
+
+    status: Optional[str] = None
+    completed: bool = False
+    completed_at: Optional[datetime] = None
+    completed_log_id: Optional[int] = None
+
+class PatientAppMedicationScheduleOut(
+    MedicationScheduleOut
+):
+    pass
+
+
+class PatientAppMedicationCompleteRequest(BaseModel):
+    scheduled_at: datetime

@@ -2,6 +2,13 @@ import { useState, useEffect } from "react";
 import { motion } from "motion/react";
 import { useParams, Link } from "react-router";
 import {
+  medicationApi,
+} from "../../api/medicationApi";
+
+import type {
+  MedicationMasterOut,
+} from "../../types/medication";
+import {
   ArrowLeft,
   User,
   Phone,
@@ -48,13 +55,14 @@ import { procedureApi } from "../../api/procedureApi";
 import { Input } from "../components/ui/input";
 import { Label } from "../components/ui/label";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "../components/ui/dialog";
-import type { PatientDetailOut, PatientMedicationOut, PatientMedicationCreate, MedicationLogOut, StaffNoteOut } from "../../types/patient";
+import type { PatientDetailOut, MedicationScheduleOut, PatientMedicationOut, PatientMedicationCreate, MedicationLogOut, StaffNoteOut } from "../../types/patient";
 import { recoveryGuideApi } from "../../api/recoveryGuideApi";
 import type {
   RecoveryGuideListItem,
   RecoveryGuideStepOut,
 } from "../../types/recoveryGuide";
 import type { ProcedureMasterOut } from "../../types/procedure";
+
 interface ProcedureEditForm {
   procedure_name: string;
   procedure_date: string;
@@ -64,7 +72,11 @@ interface ProcedureEditForm {
   recovery_stage: string;
   recovery_progress: string;
 }
-
+const getTodayDateString = () => {
+  return new Date().toLocaleDateString(
+    "sv-SE",
+  );
+};
 export function PatientDetailPage() {
 
   const { id } = useParams<{ id: string }>();
@@ -75,7 +87,22 @@ export function PatientDetailPage() {
 
   const [patient, setPatient] = useState<PatientDetailOut | null>(null);
   const [medications, setMedications] = useState<PatientMedicationOut[]>([]);
+  const [
+    medicationMasters,
+    setMedicationMasters,
+  ] = useState<MedicationMasterOut[]>([]);
+
+  const [
+    selectedMedicationMaster,
+    setSelectedMedicationMaster,
+  ] = useState("custom");
   const [medicationLogs, setMedicationLogs] = useState<MedicationLogOut[]>([]);
+  const [
+    todayMedicationSchedules,
+    setTodayMedicationSchedules,
+  ] = useState<MedicationScheduleOut[]>(
+    [],
+  );
   const [notes, setNotes] = useState<StaffNoteOut[]>([]);
   const [expandedNoteIds, setExpandedNoteIds] = useState<number[]>([]);
   const [editingNoteId, setEditingNoteId] = useState<number | null>(null);
@@ -95,13 +122,19 @@ export function PatientDetailPage() {
   const [medModalOpen, setMedModalOpen] = useState(false);
   const [editingMedId, setEditingMedId] = useState<number | null>(null);
   const [savingMed, setSavingMed] = useState(false);
-  const [medForm, setMedForm] = useState<PatientMedicationCreate>({
-    medication_name: "",
-    dosage: "",
-    frequency: "",
-    purpose: "",
-  });
+  const [medForm, setMedForm] =
+    useState<PatientMedicationCreate>({
+      medication_name: "",
+      dosage: "",
+      frequency: "",
 
+      interval_days: 1,
+      schedule_start_date:
+        getTodayDateString(),
+
+      schedule_times: [],
+      purpose: "",
+    });
   // Procedure and recovery guide edit modal
   const [procedureModalOpen, setProcedureModalOpen] = useState(false);
   const [savingProcedure, setSavingProcedure] = useState(false);
@@ -134,17 +167,26 @@ export function PatientDetailPage() {
           p,
           meds,
           logs,
+          todaySchedules,
           ns,
           procedureMasterData,
           recoveryGuideData,
+          medicationMasterData,
         ] = await Promise.all([
           patientApi.get(patientId),
           patientApi.getMedications(patientId),
           patientApi.getMedicationLogs(patientId),
+          patientApi.getTodayMedicationSchedules(
+            patientId,
+          ),
           patientApi.getNotes(patientId),
           procedureApi.list(),
           recoveryGuideApi.list(),
+          medicationApi.list(),
         ]);
+        setTodayMedicationSchedules(
+          todaySchedules,
+        );
         let guideSteps: RecoveryGuideStepOut[] = [];
 
         if (p.procedure?.recovery_guide_id) {
@@ -166,7 +208,9 @@ export function PatientDetailPage() {
         setRecoverySteps(guideSteps);
         setProcedureMasters(procedureMasterData);
         setRecoveryGuides(recoveryGuideData);
-
+        setMedicationMasters(
+          medicationMasterData,
+        );
       } catch (e) {
         setError(e instanceof Error ? e.message : "환자 정보를 불러오지 못했습니다.");
       } finally {
@@ -543,55 +587,329 @@ export function PatientDetailPage() {
       setSavingProcedure(false);
     }
   };
+  const handleMedicationMasterChange = (
+    value: string,
+  ) => {
+    setSelectedMedicationMaster(value);
+
+    if (value === "custom") {
+      setMedForm({
+        medication_name: "",
+        dosage: "",
+        frequency: "",
+        interval_days: 1,
+        schedule_start_date:
+          getTodayDateString(),
+        schedule_times: [],
+        purpose: "",
+      });
+
+      return;
+    }
+
+    const selectedMaster =
+      medicationMasters.find(
+        (medication) =>
+          String(medication.id) === value,
+      );
+
+    if (!selectedMaster) {
+      return;
+    }
+
+    const frequency =
+      selectedMaster.default_frequency
+      || "";
+
+    setMedForm({
+      medication_name:
+        selectedMaster.name,
+      dosage:
+        selectedMaster.default_dosage
+        || "",
+      frequency,
+      interval_days: 1,
+      schedule_start_date:
+        getTodayDateString(),
+      schedule_times:
+        getDefaultScheduleTimes(
+          frequency,
+        ),
+      purpose:
+        selectedMaster.purpose || "",
+    });
+  };
   const openAddMed = () => {
     setEditingMedId(null);
-    setMedForm({ medication_name: "", dosage: "", frequency: "", purpose: "" });
+    setSelectedMedicationMaster(
+      "custom",
+    );
+
+    setMedForm({
+      medication_name: "",
+      dosage: "",
+      frequency: "",
+      interval_days: 1,
+      schedule_start_date:
+        getTodayDateString(),
+      schedule_times: [],
+      purpose: "",
+    });
+
     setMedModalOpen(true);
   };
 
-  const openEditMed = (med: PatientMedicationOut) => {
+  const openEditMed = (
+    med: PatientMedicationOut,
+  ) => {
     setEditingMedId(med.id);
+
+    const matchedMaster =
+      medicationMasters.find(
+        (master) =>
+          master.name
+          === med.medication_name,
+      );
+
+    setSelectedMedicationMaster(
+      matchedMaster
+        ? String(matchedMaster.id)
+        : "custom",
+    );
+
     setMedForm({
-      medication_name: med.medication_name,
+      medication_name:
+        med.medication_name,
       dosage: med.dosage || "",
       frequency: med.frequency || "",
+      interval_days:
+        med.interval_days ?? 1,
+      schedule_start_date:
+        med.schedule_start_date
+        ?? getTodayDateString(),
+      schedule_times:
+        med.schedule_times ?? [],
       purpose: med.purpose || "",
     });
+
     setMedModalOpen(true);
+  };
+
+  const updateMedScheduleTime = (
+    index: number,
+    value: string,
+  ) => {
+    const updatedTimes = [
+      ...(medForm.schedule_times ?? []),
+    ];
+
+    updatedTimes[index] = value;
+
+    setMedForm({
+      ...medForm,
+      schedule_times: updatedTimes,
+    });
   };
 
   const handleSaveMed = async () => {
     if (!medForm.medication_name.trim()) {
-      toast.error("약물명을 입력해주세요.");
+      toast.error(
+        "약물명을 입력해주세요.",
+      );
       return;
     }
+
+    if (
+      medForm.frequency !== "as-needed"
+      && (
+        !medForm.schedule_times
+        || medForm.schedule_times.length === 0
+      )
+    ) {
+      toast.error(
+        "복용 시간을 설정해주세요.",
+      );
+      return;
+    }
+
+    if (
+      !medForm.schedule_start_date
+    ) {
+      toast.error(
+        "복용 시작일을 입력해주세요.",
+      );
+      return;
+    }
+
     try {
       setSavingMed(true);
+
       if (editingMedId) {
-        const updated = await patientApi.updateMedication(patientId, editingMedId, medForm);
-        setMedications(medications.map(m => m.id === editingMedId ? updated : m));
-        toast.success("복약 정보가 수정되었습니다.");
+        const updated =
+          await patientApi.updateMedication(
+            patientId,
+            editingMedId,
+            medForm,
+          );
+
+        setMedications((previous) =>
+          previous.map((medication) =>
+            medication.id === editingMedId
+              ? updated
+              : medication,
+          ),
+        );
+
+        toast.success(
+          "복약 정보가 수정되었습니다.",
+        );
       } else {
-        const newMed = await patientApi.addMedication(patientId, medForm);
-        setMedications([...medications, newMed]);
-        toast.success("약물이 추가되었습니다.");
+        const newMedication =
+          await patientApi.addMedication(
+            patientId,
+            medForm,
+          );
+
+        setMedications((previous) => [
+          ...previous,
+          newMedication,
+        ]);
+
+        toast.success(
+          "약물이 추가되었습니다.",
+        );
       }
+
       setMedModalOpen(false);
-    } catch {
-      toast.error("저장에 실패했습니다.");
+    } catch (error) {
+      toast.error(
+        error instanceof Error
+          ? error.message
+          : "저장에 실패했습니다.",
+      );
     } finally {
       setSavingMed(false);
     }
   };
 
-  const handleDeleteMed = async (medId: number) => {
-    if (!window.confirm("이 약물을 삭제하시겠습니까?")) return;
+  const getMedicationFrequencyLabel = (
+    frequency?: string,
+  ) => {
+    if (frequency === "daily-1") {
+      return "하루 1회";
+    }
+
+    if (frequency === "daily-2") {
+      return "하루 2회";
+    }
+
+    if (frequency === "daily-3") {
+      return "하루 3회";
+    }
+
+    if (frequency === "as-needed") {
+      return "필요시";
+    }
+
+    return frequency || "-";
+  };
+
+
+  const getMedicationStatusLabel = (
+    status?: string | null,
+  ) => {
+    if (status === "completed") {
+      return "복용 완료";
+    }
+
+    if (status === "missed") {
+      return "복용 누락";
+    }
+
+    if (
+      status === "late_completed"
+    ) {
+      return "지연 복용";
+    }
+
+    return "복용 예정";
+  };
+
+
+  const getMedicationStatusClass = (
+    status?: string | null,
+  ) => {
+    if (status === "completed") {
+      return "bg-teal-500 text-white";
+    }
+
+    if (status === "missed") {
+      return "bg-destructive text-white";
+    }
+
+    if (
+      status === "late_completed"
+    ) {
+      return "bg-amber-500 text-white";
+    }
+
+    return "bg-blue-100 text-blue-700";
+  };
+  const getDefaultScheduleTimes = (
+    frequency: string,
+  ): string[] => {
+    if (frequency === "daily-1") {
+      return ["09:00"];
+    }
+
+    if (frequency === "daily-2") {
+      return ["09:00", "21:00"];
+    }
+
+    if (frequency === "daily-3") {
+      return [
+        "09:00",
+        "14:00",
+        "21:00",
+      ];
+    }
+
+    return [];
+  };
+
+  const handleDeleteMed = async (
+    medId: number,
+  ) => {
+    if (
+      !window.confirm(
+        "이 약물을 삭제하시겠습니까?",
+      )
+    ) {
+      return;
+    }
+
     try {
-      await patientApi.deleteMedication(patientId, medId);
-      setMedications(medications.filter(m => m.id !== medId));
-      toast.success("약물이 삭제되었습니다.");
-    } catch {
-      toast.error("삭제에 실패했습니다.");
+      await patientApi.deleteMedication(
+        patientId,
+        medId,
+      );
+
+      setMedications((previous) =>
+        previous.filter(
+          (medication) =>
+            medication.id !== medId,
+        ),
+      );
+
+      toast.success(
+        "약물이 삭제되었습니다.",
+      );
+    } catch (error) {
+      toast.error(
+        error instanceof Error
+          ? error.message
+          : "삭제에 실패했습니다.",
+      );
     }
   };
 
@@ -716,16 +1034,50 @@ export function PatientDetailPage() {
                     <DropdownMenuTrigger asChild>
                       <Badge
                         variant="default"
-                        className={`text-lg px-4 py-2 cursor-pointer hover:opacity-80 transition-opacity ${patient.medication_status === "정상" ? "bg-teal-500" : "bg-destructive"}`}
+                        className={`
+                          text-lg px-4 py-2 cursor-pointer
+                          hover:opacity-80 transition-opacity
+                          ${patient.medication_status
+                            === "정상"
+                            ? "bg-teal-500"
+                            : patient.medication_status
+                              === "지연"
+                              ? "bg-amber-500"
+                              : "bg-destructive"
+                          }
+                        `}
                       >
                         {patient.medication_status}
                       </Badge>
                     </DropdownMenuTrigger>
                     <DropdownMenuContent>
-                      <DropdownMenuItem onClick={() => handleUpdateMedicationStatus("정상")}>
+                      <DropdownMenuItem
+                        onClick={() =>
+                          handleUpdateMedicationStatus(
+                            "정상",
+                          )
+                        }
+                      >
                         정상으로 변경
                       </DropdownMenuItem>
-                      <DropdownMenuItem onClick={() => handleUpdateMedicationStatus("누락")}>
+
+                      <DropdownMenuItem
+                        onClick={() =>
+                          handleUpdateMedicationStatus(
+                            "지연",
+                          )
+                        }
+                      >
+                        지연으로 변경
+                      </DropdownMenuItem>
+
+                      <DropdownMenuItem
+                        onClick={() =>
+                          handleUpdateMedicationStatus(
+                            "누락",
+                          )
+                        }
+                      >
                         누락으로 변경
                       </DropdownMenuItem>
                     </DropdownMenuContent>
@@ -831,24 +1183,104 @@ export function PatientDetailPage() {
                 </CardHeader>
                 <CardContent className="space-y-4">
                   {medications.length === 0 ? (
-                    <p className="text-sm text-muted-foreground text-center py-4">처방 약물이 없습니다.</p>
+                    <p className="text-sm text-muted-foreground text-center py-4">
+                      처방 약물이 없습니다.
+                    </p>
+                  ) : todayMedicationSchedules.length === 0 ? (
+                    <p className="text-sm text-muted-foreground text-center py-4">
+                      오늘 예정된 복약 일정이 없습니다.
+                    </p>
                   ) : (
-                    medications.map((med) => (
-                      <div key={med.id} className="p-4 rounded-lg border border-border bg-muted/30">
-                        <div className="flex items-start justify-between mb-3">
-                          <div>
-                            <p className="font-semibold">{med.medication_name}</p>
-                            <p className="text-sm text-muted-foreground">
-                              {med.dosage} · {med.frequency}
-                            </p>
+                    <div className="space-y-4">
+                      {medications.map((medication) => {
+                        const medicationSchedules =
+                          todayMedicationSchedules.filter(
+                            (schedule) =>
+                              schedule.medication_id
+                              === medication.id,
+                          );
+
+                        if (
+                          medicationSchedules.length === 0
+                        ) {
+                          return null;
+                        }
+
+                        return (
+                          <div
+                            key={medication.id}
+                            className="rounded-lg border border-border bg-muted/20 p-4"
+                          >
+                            <div className="mb-3">
+                              <p className="font-semibold">
+                                {medication.medication_name}
+                              </p>
+
+                              <p className="text-sm text-muted-foreground">
+                                {medication.dosage
+                                  || "용량 미등록"}
+                                {" · "}
+                                {medication.interval_days === 1
+                                  ? "매일"
+                                  : `${medication.interval_days}일마다`}
+                                {" · "}
+                                {getMedicationFrequencyLabel(
+                                  medication.frequency,
+                                )}
+                              </p>
+                            </div>
+
+                            <div className="space-y-2">
+                              {medicationSchedules.map(
+                                (schedule) => (
+                                  <div
+                                    key={
+                                      `${schedule.medication_id}-`
+                                      + schedule.scheduled_at
+                                    }
+                                    className="flex items-center justify-between gap-4 rounded-md border border-border bg-background p-3"
+                                  >
+                                    <div>
+                                      <p className="font-medium">
+                                        {schedule.scheduled_time}
+                                      </p>
+
+                                      <p className="text-xs text-muted-foreground">
+                                        예정:{" "}
+                                        {schedule.scheduled_at
+                                          .replace("T", " ")
+                                          .substring(0, 16)}
+                                      </p>
+
+                                      {schedule.completed_at && (
+                                        <p className="text-xs text-muted-foreground">
+                                          실제 복용:{" "}
+                                          {schedule.completed_at
+                                            .replace("T", " ")
+                                            .substring(0, 16)}
+                                        </p>
+                                      )}
+                                    </div>
+
+                                    <Badge
+                                      className={
+                                        getMedicationStatusClass(
+                                          schedule.status,
+                                        )
+                                      }
+                                    >
+                                      {getMedicationStatusLabel(
+                                        schedule.status,
+                                      )}
+                                    </Badge>
+                                  </div>
+                                ),
+                              )}
+                            </div>
                           </div>
-                          <Badge variant="outline" className="bg-background">
-                            {med.adherence}%
-                          </Badge>
-                        </div>
-                        <Progress value={med.adherence} className="h-2" />
-                      </div>
-                    ))
+                        );
+                      })}
+                    </div>
                   )}
                 </CardContent>
               </Card>
@@ -895,19 +1327,49 @@ export function PatientDetailPage() {
                           <div className="flex items-center gap-3">
                             {record.status === "completed" ? (
                               <CheckCircle2 className="size-5 text-teal-600" />
+                            ) : record.status === "late_completed" ? (
+                              <Clock className="size-5 text-amber-600" />
                             ) : (
                               <XCircle className="size-5 text-destructive" />
                             )}
                             <div>
-                              <p className="font-medium">{record.medication_name}</p>
-                              <p className="text-sm text-muted-foreground">{record.scheduled_at.replace("T", " ").substring(0, 16)}</p>
+                              <p className="font-medium">
+                                {record.medication_name}
+                              </p>
+
+                              <p className="text-sm text-muted-foreground">
+                                예정:{" "}
+                                {record.scheduled_at
+                                  .replace("T", " ")
+                                  .substring(0, 16)}
+                              </p>
+
+                              {record.completed_at && (
+                                <p className="text-sm text-muted-foreground">
+                                  실제 복용:{" "}
+                                  {record.completed_at
+                                    .replace("T", " ")
+                                    .substring(0, 16)}
+                                </p>
+                              )}
                             </div>
                           </div>
                           <Badge
-                            variant={record.status === "completed" ? "default" : "destructive"}
-                            className={record.status === "completed" ? "bg-teal-500" : ""}
+                            className={
+                              record.status === "completed"
+                                ? "bg-teal-500"
+                                : record.status
+                                  === "late_completed"
+                                  ? "bg-amber-500"
+                                  : "bg-destructive"
+                            }
                           >
-                            {record.status === "completed" ? "복용 완료" : "누락"}
+                            {record.status === "completed"
+                              ? "복용 완료"
+                              : record.status
+                                === "late_completed"
+                                ? "지연 복용"
+                                : "복용 누락"}
                           </Badge>
                         </div>
                       ))
@@ -943,16 +1405,49 @@ export function PatientDetailPage() {
                               <div className="flex items-center gap-3">
                                 {record.status === "completed" ? (
                                   <CheckCircle2 className="size-5 text-teal-600" />
+                                ) : record.status === "late_completed" ? (
+                                  <Clock className="size-5 text-amber-600" />
                                 ) : (
                                   <XCircle className="size-5 text-destructive" />
                                 )}
                                 <div>
-                                  <p className="font-medium">{record.medication_name}</p>
-                                  <p className="text-sm text-muted-foreground">{record.scheduled_at.substring(11, 16)}</p>
+                                  <p className="font-medium">
+                                    {record.medication_name}
+                                  </p>
+
+                                  <p className="text-sm text-muted-foreground">
+                                    예정:{" "}
+                                    {record.scheduled_at
+                                      .replace("T", " ")
+                                      .substring(0, 16)}
+                                  </p>
+
+                                  {record.completed_at && (
+                                    <p className="text-sm text-muted-foreground">
+                                      실제 복용:{" "}
+                                      {record.completed_at
+                                        .replace("T", " ")
+                                        .substring(0, 16)}
+                                    </p>
+                                  )}
                                 </div>
                               </div>
-                              <Badge variant={record.status === "completed" ? "default" : "destructive"} className={record.status === "completed" ? "bg-teal-500" : ""}>
-                                {record.status === "completed" ? "완료" : "누락"}
+                              <Badge
+                                className={
+                                  record.status === "completed"
+                                    ? "bg-teal-500 text-white"
+                                    : record.status
+                                      === "late_completed"
+                                      ? "bg-amber-500 text-white"
+                                      : "bg-destructive text-white"
+                                }
+                              >
+                                {record.status === "completed"
+                                  ? "복용 완료"
+                                  : record.status
+                                    === "late_completed"
+                                    ? "지연 복용"
+                                    : "복용 누락"}
                               </Badge>
                             </div>
                           ))}
@@ -992,9 +1487,36 @@ export function PatientDetailPage() {
                       <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-4">
                         <div><p className="text-sm text-muted-foreground mb-1">약물명</p><p className="font-semibold">{med.medication_name}</p></div>
                         <div><p className="text-sm text-muted-foreground mb-1">용량</p><p className="font-semibold">{med.dosage ?? "-"}</p></div>
-                        <div><p className="text-sm text-muted-foreground mb-1">복용 빈도</p><p className="font-semibold">{med.frequency ?? "-"}</p></div>
+                        <div><p className="text-sm text-muted-foreground mb-1">복용 빈도</p><p className="font-semibold">
+                          {med.interval_days === 1
+                            ? "매일"
+                            : `${med.interval_days}일마다`}
+                          {" · "}
+                          {getMedicationFrequencyLabel(
+                            med.frequency,
+                          )}
+                        </p></div>
                         <div><p className="text-sm text-muted-foreground mb-1">목적</p><p className="font-semibold">{med.purpose ?? "-"}</p></div>
                       </div>
+                      {med.schedule_times?.length > 0 && (
+                        <div className="mb-4 flex flex-wrap items-center gap-2">
+                          <span className="text-sm text-muted-foreground">
+                            복용 시간
+                          </span>
+
+                          {med.schedule_times.map(
+                            (timeValue, timeIndex) => (
+                              <Badge
+                                key={`${med.id}-${timeIndex}`}
+                                variant="outline"
+                                className="bg-background"
+                              >
+                                {timeValue}
+                              </Badge>
+                            ),
+                          )}
+                        </div>
+                      )}
                       <div className="flex gap-2 justify-end opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity">
                         <Button variant="outline" size="sm" className="gap-1" onClick={() => openEditMed(med)}>
                           <Edit className="size-3" />
@@ -1025,11 +1547,54 @@ export function PatientDetailPage() {
               </DialogHeader>
               <div className="space-y-4 py-2">
                 <div className="space-y-2">
+                  <Label>약물 선택</Label>
+
+                  <Select
+                    value={selectedMedicationMaster}
+                    onValueChange={
+                      handleMedicationMasterChange
+                    }
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="약물 선택" />
+                    </SelectTrigger>
+
+                    <SelectContent>
+                      <SelectItem value="custom">
+                        직접 입력
+                      </SelectItem>
+
+                      {medicationMasters.map(
+                        (medication) => (
+                          <SelectItem
+                            key={medication.id}
+                            value={String(
+                              medication.id,
+                            )}
+                          >
+                            {medication.name}
+                          </SelectItem>
+                        ),
+                      )}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-2">
                   <Label>약물명</Label>
                   <Input
                     value={medForm.medication_name}
-                    onChange={(e) => setMedForm({ ...medForm, medication_name: e.target.value })}
+                    onChange={(event) =>
+                      setMedForm({
+                        ...medForm,
+                        medication_name:
+                          event.target.value,
+                      })
+                    }
                     placeholder="예: 미노씬 캡슐"
+                    disabled={
+                      selectedMedicationMaster
+                      !== "custom"
+                    }
                   />
                 </div>
                 <div className="grid grid-cols-2 gap-4">
@@ -1043,13 +1608,113 @@ export function PatientDetailPage() {
                   </div>
                   <div className="space-y-2">
                     <Label>빈도</Label>
-                    <Input
+
+                    <Select
                       value={medForm.frequency || ""}
-                      onChange={(e) => setMedForm({ ...medForm, frequency: e.target.value })}
-                      placeholder="예: 1일 2회"
+                      onValueChange={(value) =>
+                        setMedForm({
+                          ...medForm,
+                          frequency: value,
+                          schedule_times:
+                            getDefaultScheduleTimes(value),
+                        })
+                      }
+                    >
+                      <SelectTrigger>
+                        <SelectValue placeholder="복용 빈도 선택" />
+                      </SelectTrigger>
+
+                      <SelectContent>
+                        <SelectItem value="daily-1">
+                          1일 1회
+                        </SelectItem>
+
+                        <SelectItem value="daily-2">
+                          1일 2회
+                        </SelectItem>
+
+                        <SelectItem value="daily-3">
+                          1일 3회
+                        </SelectItem>
+
+                        <SelectItem value="as-needed">
+                          필요시
+                        </SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <Label>복용 간격</Label>
+
+                    <div className="flex items-center gap-2">
+                      <Input
+                        type="number"
+                        min="1"
+                        max="365"
+                        value={medForm.interval_days}
+                        onChange={(event) =>
+                          setMedForm({
+                            ...medForm,
+                            interval_days: Math.max(
+                              1,
+                              Number(event.target.value)
+                              || 1,
+                            ),
+                          })
+                        }
+                      />
+
+                      <span className="text-sm whitespace-nowrap">
+                        일마다
+                      </span>
+                    </div>
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label>복용 시작일</Label>
+
+                    <Input
+                      type="date"
+                      value={
+                        medForm.schedule_start_date
+                        || ""
+                      }
+                      onChange={(event) =>
+                        setMedForm({
+                          ...medForm,
+                          schedule_start_date:
+                            event.target.value,
+                        })
+                      }
                     />
                   </div>
                 </div>
+                {(medForm.schedule_times ?? []).length > 0 && (
+                  <div className="space-y-2">
+                    <Label>복용 시간</Label>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                      {(medForm.schedule_times ?? []).map(
+                        (timeValue, index) => (
+                          <Input
+                            key={index}
+                            type="time"
+                            value={timeValue}
+                            onChange={(event) =>
+                              updateMedScheduleTime(
+                                index,
+                                event.target.value,
+                              )
+                            }
+                          />
+                        ),
+                      )}
+                    </div>
+                  </div>
+                )}
+
                 <div className="space-y-2">
                   <Label>목적</Label>
                   <Input

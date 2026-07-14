@@ -1,7 +1,17 @@
 from datetime import datetime
 from sqlalchemy import (
-    Column, Integer, String, Text, DateTime, Date, Time,
-    Boolean, Float, ForeignKey, Enum
+    Column,
+    Integer,
+    String,
+    Text,
+    DateTime,
+    Date,
+    Time,
+    Boolean,
+    Float,
+    ForeignKey,
+    Enum,
+    JSON,
 )
 from sqlalchemy.orm import relationship
 from database import Base
@@ -16,6 +26,7 @@ class UserRole(str, enum.Enum):
 class MedicationStatus(str, enum.Enum):
     completed = "completed"
     missed = "missed"
+    late_completed = "late_completed"
 
 
 class AlertType(str, enum.Enum):
@@ -97,33 +108,121 @@ class MedicationMaster(Base):
 class PatientMedication(Base):
     __tablename__ = "patient_medications"
 
-    id = Column(Integer, primary_key=True, index=True)
-    patient_id = Column(Integer, ForeignKey("patients.id"), nullable=False)
-    medication_name = Column(String(200), nullable=False)
-    dosage = Column(String(50), nullable=True)
-    frequency = Column(String(50), nullable=True)
-    purpose = Column(String(200), nullable=True)
-    adherence = Column(Float, default=100.0)
-    is_active = Column(Boolean, default=True)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    id = Column(
+        Integer,
+        primary_key=True,
+        index=True,
+    )
+    patient_id = Column(
+        Integer,
+        ForeignKey("patients.id"),
+        nullable=False,
+    )
+    medication_name = Column(
+        String(200),
+        nullable=False,
+    )
+    dosage = Column(
+        String(50),
+        nullable=True,
+    )
+    frequency = Column(
+        String(50),
+        nullable=True,
+    )
 
-    patient = relationship("Patient", back_populates="medications")
-    logs = relationship("MedicationLog", back_populates="medication", cascade="all, delete-orphan")
+    interval_days = Column(
+        Integer,
+        nullable=False,
+        default=1,
+    )
 
+    schedule_start_date = Column(
+        Date,
+        nullable=True,
+    )
+
+    schedule_times = Column(
+        JSON,
+        nullable=True,
+        default=list,
+    )
+
+    purpose = Column(
+        String(200),
+        nullable=True,
+    )
+    adherence = Column(
+        Float,
+        default=100.0,
+    )
+    is_active = Column(
+        Boolean,
+        default=True,
+    )
+    created_at = Column(
+        DateTime,
+        default=datetime.utcnow,
+    )
+
+    patient = relationship(
+        "Patient",
+        back_populates="medications",
+    )
+
+    logs = relationship(
+        "MedicationLog",
+        back_populates="medication",
+        cascade="all, delete-orphan",
+    )
 
 class MedicationLog(Base):
     __tablename__ = "medication_logs"
 
-    id = Column(Integer, primary_key=True, index=True)
-    patient_id = Column(Integer, ForeignKey("patients.id"), nullable=False)
-    patient_medication_id = Column(Integer, ForeignKey("patient_medications.id"), nullable=True)
-    medication_name = Column(String(200), nullable=False)
-    scheduled_at = Column(DateTime, nullable=False)
-    status = Column(Enum(MedicationStatus), nullable=False)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    id = Column(
+        Integer,
+        primary_key=True,
+        index=True,
+    )
+    patient_id = Column(
+        Integer,
+        ForeignKey("patients.id"),
+        nullable=False,
+    )
+    patient_medication_id = Column(
+        Integer,
+        ForeignKey("patient_medications.id"),
+        nullable=True,
+    )
+    medication_name = Column(
+        String(200),
+        nullable=False,
+    )
+    scheduled_at = Column(
+        DateTime,
+        nullable=False,
+    )
+    status = Column(
+        Enum(MedicationStatus),
+        nullable=False,
+    )
+    completed_at = Column(
+        DateTime,
+        nullable=True,
+    )
+    created_at = Column(
+        DateTime,
+        default=datetime.utcnow,
+    )
 
-    patient = relationship("Patient", back_populates="medication_logs")
-    medication = relationship("PatientMedication", back_populates="logs")
+    patient = relationship(
+        "Patient",
+        back_populates="medication_logs",
+    )
+    medication = relationship(
+        "PatientMedication",
+        back_populates="logs",
+    )
 
 
 class RecoveryGuide(Base):

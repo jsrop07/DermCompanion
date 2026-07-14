@@ -1,6 +1,7 @@
 export interface DashboardSummary {
   today_patients: number;
   active_recovery_patients: number;
+  delayed_medication_patients: number;
   missed_medication_patients: number;
 }
 
